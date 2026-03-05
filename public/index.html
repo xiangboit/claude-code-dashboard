@@ -71,6 +71,17 @@
             font-size: 13px;
             font-weight: 500;
             margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .session-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #4caf50;
+            flex-shrink: 0;
         }
 
         .project-desc {
@@ -136,18 +147,35 @@
             color: #666;
         }
 
-        .reconnect-btn {
+        .session-actions {
+            display: none;
+            gap: 8px;
+        }
+
+        .session-actions .btn {
             background: none;
-            color: #4a90e2;
-            border: 1px solid #4a90e2;
             padding: 4px 12px;
             border-radius: 4px;
             cursor: pointer;
             font-size: 12px;
-            display: none;
         }
 
-        .reconnect-btn:hover {
+        .btn-resume {
+            color: #4caf50;
+            border: 1px solid #4caf50;
+        }
+
+        .btn-resume:hover {
+            background: #4caf50;
+            color: #fff;
+        }
+
+        .btn-new {
+            color: #4a90e2;
+            border: 1px solid #4a90e2;
+        }
+
+        .btn-new:hover {
             background: #4a90e2;
             color: #fff;
         }
@@ -195,7 +223,10 @@
                 <h1 id="projectTitle">Claude Code Dashboard</h1>
                 <div class="project-path" id="headerProjectPath"></div>
             </div>
-            <button class="reconnect-btn" id="reconnectBtn" onclick="reconnect()">重新连接</button>
+            <div class="session-actions" id="sessionActions">
+                <button class="btn btn-resume" onclick="reconnect(true)">恢复对话</button>
+                <button class="btn btn-new" onclick="reconnect(false)">新对话</button>
+            </div>
         </div>
 
         <div class="empty-state" id="emptyState">选择一个项目启动 Claude Code</div>
