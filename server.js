@@ -12,7 +12,7 @@ const Database = require('better-sqlite3');
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // ---- 数据库 ----
 
@@ -44,6 +44,9 @@ const TOKEN_TTL = 7 * 24 * 60 * 60 * 1000; // 7 天
 // 启动时清理过期 token
 db.prepare('DELETE FROM tokens WHERE expires_at < ?').run(Date.now());
 
+// 默认管理员账户（首次启动自动创建）
+const DEFAULT_ADMIN = { username: 'admin', password: '123456' };
+
 function hashPassword(password, salt) {
   salt = salt || crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(password, salt, 64).toString('hex');
@@ -60,6 +63,16 @@ function migrateOldHash(username, password) {
   const newHash = hashPassword(password);
   db.prepare('UPDATE users SET hash = ? WHERE username = ?').run(newHash, username);
   return newHash;
+}
+
+// 启动时：无用户则创建默认管理员
+{
+  const userCount = db.prepare('SELECT COUNT(*) AS cnt FROM users').get().cnt;
+  if (userCount === 0) {
+    db.prepare('INSERT INTO users (username, hash, created_at) VALUES (?, ?, ?)')
+      .run(DEFAULT_ADMIN.username, hashPassword(DEFAULT_ADMIN.password), Date.now());
+    console.log(`已创建默认管理员: ${DEFAULT_ADMIN.username} / ${DEFAULT_ADMIN.password}`);
+  }
 }
 
 app.post('/api/register', (req, res) => {
@@ -113,6 +126,25 @@ function requireAuth(req, res, next) {
   next();
 }
 
+app.post('/api/change-password', (req, res) => {
+  const user = getUser(req);
+  if (!user) return res.status(401).json({ error: '未登录' });
+  const { oldPassword, newPassword } = req.body;
+  if (!oldPassword || !newPassword) return res.status(400).json({ error: '请填写旧密码和新密码' });
+  if (newPassword.length < 4) return res.status(400).json({ error: '新密码最少4位' });
+  const row = db.prepare('SELECT hash FROM users WHERE username = ?').get(user);
+  if (!row) return res.status(404).json({ error: '用户不存在' });
+  // 兼容旧 SHA256 哈希
+  if (!row.hash.includes(':')) {
+    const oldHash = crypto.createHash('sha256').update(oldPassword).digest('hex');
+    if (row.hash !== oldHash) return res.status(401).json({ error: '旧密码错误' });
+  } else {
+    if (!verifyPassword(oldPassword, row.hash)) return res.status(401).json({ error: '旧密码错误' });
+  }
+  db.prepare('UPDATE users SET hash = ? WHERE username = ?').run(hashPassword(newPassword), user);
+  res.json({ success: true });
+});
+
 app.get('/api/auth/status', (req, res) => {
   const userCount = db.prepare('SELECT COUNT(*) AS cnt FROM users').get().cnt;
   const user = getUser(req);
@@ -127,6 +159,26 @@ app.use('/api/projects', requireAuth);
 app.use('/api/clone', requireAuth);
 app.use('/api/sessions', requireAuth);
 app.use('/api/health', requireAuth);
+app.use('/api/clipboard', requireAuth);
+
+// 剪贴板同步：接收远程浏览器的图片，写入 macOS 系统剪贴板
+app.post('/api/clipboard', (req, res) => {
+  const { image } = req.body; // base64 encoded PNG
+  if (!image) return res.status(400).json({ error: '缺少图片数据' });
+  const buf = Buffer.from(image, 'base64');
+  const tmpFile = path.join(os.tmpdir(), `clipboard-${Date.now()}.png`);
+  try {
+    fs.writeFileSync(tmpFile, buf);
+    execFileSync('osascript', ['-e',
+      `set the clipboard to (read (POSIX file "${tmpFile}") as «class PNGf»)`
+    ], { timeout: 5000 });
+    fs.unlinkSync(tmpFile);
+    res.json({ success: true });
+  } catch (e) {
+    try { fs.unlinkSync(tmpFile); } catch {}
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // 自动检测 claude 路径
 let claudePath;
@@ -508,6 +560,9 @@ wss.on('connection', (ws, req) => {
       if (currentSessionId) detachSession(currentSessionId);
       currentSessionId = msg.sessionId;
       attachSession(msg.sessionId, ws);
+      if (msg.cols && msg.rows) {
+        session.pty.resize(msg.cols, msg.rows);
+      }
       if (session.buffer) {
         ws.send(JSON.stringify({ type: 'replay', data: session.buffer }));
       }

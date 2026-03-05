@@ -8,8 +8,43 @@ let lastRows = 0;
 let projectsCache = [];
 let sessionsCache = [];
 let pendingAction = null;
+let projectSearchQuery = '';
+let termFontSize = parseInt(localStorage.getItem('termFontSize')) || (window.innerWidth <= 768 ? 12 : 14);
+let idleWarningTimer = null;
 let authToken = localStorage.getItem('authToken') || '';
 let currentUser = localStorage.getItem('currentUser') || '';
+
+// ---- 主题切换 ----
+
+function getThemeColor(varName) {
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+function toggleTheme() {
+    const html = document.documentElement;
+    const current = html.getAttribute('data-theme');
+    const next = current === 'light' ? null : 'light';
+    if (next) {
+        html.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+    } else {
+        html.removeAttribute('data-theme');
+        localStorage.removeItem('theme');
+    }
+    updateThemeIcon();
+}
+
+function updateThemeIcon() {
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    const icon = isLight ? '\u2600\uFE0F' : '\uD83C\uDF19';
+    const sidebarBtn = document.getElementById('sidebarThemeToggle');
+    const loginBtn = document.getElementById('loginThemeToggle');
+    if (sidebarBtn) sidebarBtn.textContent = icon;
+    if (loginBtn) loginBtn.textContent = icon;
+}
+
+// 初始化图标
+updateThemeIcon();
 
 // ---- 认证 ----
 
@@ -24,16 +59,20 @@ async function authFetch(url, opts = {}) {
         authToken = '';
         localStorage.removeItem('authToken');
         localStorage.removeItem('currentUser');
-        showLogin();
+        showLogin(true); // 能收到 401 说明服务在线且有用户，显示登录页
         throw new Error('未登录');
     }
     return res;
 }
 
+let authRetryCount = 0;
+const AUTH_MAX_RETRIES = 5;
+
 async function checkAuth() {
     try {
         const res = await fetch('/api/auth/status', { headers: authHeaders() });
         const data = await res.json();
+        authRetryCount = 0;
         if (data.loggedIn) {
             currentUser = data.username;
             showApp();
@@ -41,8 +80,24 @@ async function checkAuth() {
             showLogin(data.hasUsers);
         }
     } catch {
-        showLogin(false);
+        // 服务不可达时：有 token 则重试等待服务恢复，否则直接显示登录
+        if (authToken && authRetryCount < AUTH_MAX_RETRIES) {
+            authRetryCount++;
+            const delay = Math.min(1000 * authRetryCount, 5000);
+            showLoginMessage('正在连接服务...');
+            setTimeout(checkAuth, delay);
+        } else {
+            authRetryCount = 0;
+            showLogin(true); // 默认显示登录页而非注册页
+        }
     }
+}
+
+function showLoginMessage(msg) {
+    document.getElementById('loginOverlay').style.display = 'flex';
+    document.getElementById('appMain').style.display = 'none';
+    document.getElementById('loginError').textContent = msg;
+    document.getElementById('loginError').style.color = 'var(--c-text-muted)';
 }
 
 function showLogin(hasUsers) {
@@ -59,13 +114,19 @@ function showLogin(hasUsers) {
         submitBtn.textContent = '登录';
         submitBtn.onclick = () => doAuth('/api/login');
     }
-    document.getElementById('loginError').textContent = '';
+    const errEl = document.getElementById('loginError');
+    errEl.textContent = '';
+    errEl.style.color = 'var(--c-red)';
 }
 
 function showApp() {
     document.getElementById('loginOverlay').style.display = 'none';
     document.getElementById('appMain').style.display = 'flex';
     document.getElementById('currentUserName').textContent = currentUser;
+    // Restore sidebar collapsed state
+    if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
+        document.getElementById('sidebar').classList.add('collapsed');
+    }
     initApp();
 }
 
@@ -87,6 +148,67 @@ async function doAuth(endpoint) {
             localStorage.setItem('authToken', authToken);
             localStorage.setItem('currentUser', currentUser);
             showApp();
+        } else {
+            errorEl.textContent = data.error;
+        }
+    } catch (e) {
+        errorEl.textContent = e.message;
+    }
+}
+
+// ---- 用户菜单 & 修改密码 ----
+
+function toggleUserMenu() {
+    const menu = document.getElementById('userMenu');
+    menu.classList.toggle('open');
+}
+
+// 点击其他区域关闭弹出层
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.user-info')) {
+        const menu = document.getElementById('userMenu');
+        if (menu) menu.classList.remove('open');
+    }
+    if (!e.target.closest('.header-project-selector')) {
+        const pd = document.getElementById('projectDropdown');
+        if (pd) pd.classList.remove('open');
+    }
+});
+
+function showChangePassword() {
+    document.getElementById('userMenu').classList.remove('open');
+    document.getElementById('changePwdModal').classList.add('open');
+    document.getElementById('oldPassword').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('confirmPassword').value = '';
+    document.getElementById('changePwdError').textContent = '';
+    document.getElementById('oldPassword').focus();
+}
+
+function closeChangePassword() {
+    document.getElementById('changePwdModal').classList.remove('open');
+}
+
+async function doChangePassword() {
+    const oldPwd = document.getElementById('oldPassword').value;
+    const newPwd = document.getElementById('newPassword').value;
+    const confirmPwd = document.getElementById('confirmPassword').value;
+    const errorEl = document.getElementById('changePwdError');
+
+    if (!oldPwd || !newPwd) { errorEl.textContent = '请填写所有字段'; return; }
+    if (newPwd.length < 4) { errorEl.textContent = '新密码至少4位'; return; }
+    if (newPwd !== confirmPwd) { errorEl.textContent = '两次密码不一致'; return; }
+
+    try {
+        const res = await authFetch('/api/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            closeChangePassword();
+            showToast('密码修改成功');
         } else {
             errorEl.textContent = data.error;
         }
@@ -128,8 +250,14 @@ function hideSessionActions() {
 }
 
 function formatTime(ts) {
+    const now = Date.now();
+    const diff = now - ts;
+    if (diff < 60000) return '刚刚';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
     const d = new Date(ts);
-    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    if (diff < 172800000) return `昨天 ${d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
+    return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
 // ---- Toast 通知 ----
@@ -149,10 +277,19 @@ function showToast(message) {
 
 // ---- 终端 ----
 
+function changeFontSize(delta) {
+    termFontSize = Math.max(10, Math.min(22, termFontSize + delta));
+    localStorage.setItem('termFontSize', termFontSize);
+    if (term) {
+        term.options.fontSize = termFontSize;
+        setTimeout(doFit, 50);
+    }
+}
+
 function initTerminal() {
     term = new Terminal({
         cursorBlink: true,
-        fontSize: 14,
+        fontSize: termFontSize,
         fontFamily: 'Monaco, Menlo, "Courier New", monospace',
         theme: {
             background: '#1a1a1a',
@@ -168,8 +305,28 @@ function initTerminal() {
 
     term.open(document.getElementById('terminal'));
 
+    let inputBuffer = '';
+    let inputTimer = null;
+    const INPUT_FLUSH_DELAY = 40; // ms
+
+    function flushInput() {
+        if (inputBuffer) {
+            wsSend({ type: 'input', data: inputBuffer });
+            inputBuffer = '';
+        }
+        if (inputTimer) { clearTimeout(inputTimer); inputTimer = null; }
+    }
+
     term.onData((data) => {
-        wsSend({ type: 'input', data });
+        resetIdleWarning();
+        inputBuffer += data;
+        // 控制字符（回车、Ctrl+C 等）或转义序列（方向键等）立即发送
+        if (data.length > 1 || data.charCodeAt(0) < 32 || data.charCodeAt(0) === 127) {
+            flushInput();
+        } else {
+            if (inputTimer) clearTimeout(inputTimer);
+            inputTimer = setTimeout(flushInput, INPUT_FLUSH_DELAY);
+        }
     });
 
     window.addEventListener('resize', doFit);
@@ -206,7 +363,9 @@ function connectWebSocket() {
     ws = new WebSocket(`${protocol}//${location.host}?token=${encodeURIComponent(authToken)}`);
 
     ws.onopen = () => {
-        reconnectDelay = 3000; // 连接成功，重置退避
+        reconnectDelay = 3000;
+        const banner = document.getElementById('reconnectBanner');
+        if (banner) banner.classList.remove('active');
         // 执行 pending action（如 reconnect 触发的新建会话）
         if (pendingAction) {
             const action = pendingAction;
@@ -227,21 +386,25 @@ function connectWebSocket() {
             currentSessionId = msg.sessionId;
             hideSessionActions();
             document.getElementById('killBtn').style.display = '';
+            document.getElementById('fontSizeControls').style.display = '';
+            resetIdleWarning();
             loadSessions();
         } else if (msg.type === 'attached') {
             currentSessionId = msg.sessionId;
             hideSessionActions();
             document.getElementById('killBtn').style.display = '';
+            document.getElementById('fontSizeControls').style.display = '';
+            resetIdleWarning();
             loadSessions();
         } else if (msg.type === 'detached') {
             term.writeln('\r\n\x1b[33m--- 会话已被其他连接接管 ---\x1b[0m');
         } else if (msg.type === 'exit') {
-            term.writeln('\r\n\x1b[90m--- 会话已结束 ---\x1b[0m');
-            term.writeln('\x1b[90m点击右上角「恢复对话」继续，或「新对话」重新开始\x1b[0m');
             currentSessionId = null;
             document.getElementById('killBtn').style.display = 'none';
+            document.getElementById('fontSizeControls').style.display = 'none';
+            clearIdleWarning();
             showSessionActions();
-            loadSessions();
+            loadSessions().then(() => showDashboardPanel());
         } else if (msg.type === 'notify') {
             showToast(msg.message);
             loadSessions();
@@ -251,6 +414,8 @@ function connectWebSocket() {
     };
 
     ws.onclose = () => {
+        const banner = document.getElementById('reconnectBanner');
+        if (banner) banner.classList.add('active');
         reconnectTimer = setTimeout(connectWebSocket, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_DELAY);
     };
@@ -263,6 +428,9 @@ function wsSend(msg) {
 }
 
 function startNewSession(projectId, resume) {
+    hideDashboardPanel();
+    document.getElementById('emptyState').classList.add('hidden');
+    document.getElementById('terminalWrapper').classList.add('active');
     term.clear();
     currentSessionId = null;
     hideSessionActions();
@@ -273,10 +441,13 @@ function startNewSession(projectId, resume) {
 }
 
 function attachSession(sessionId) {
+    hideDashboardPanel();
+    document.getElementById('emptyState').classList.add('hidden');
+    document.getElementById('terminalWrapper').classList.add('active');
     term.clear();
     setTimeout(() => {
         doFit();
-        wsSend({ type: 'attach', sessionId });
+        wsSend({ type: 'attach', sessionId, cols: term.cols, rows: term.rows });
     }, 50);
 }
 
@@ -327,8 +498,11 @@ function renderSessions() {
     const list = document.getElementById('sessionList');
     if (!list) return;
 
+    const clearBtn = document.getElementById('clearAllSessions');
+    if (clearBtn) clearBtn.style.display = sessionsCache.length > 1 ? '' : 'none';
+
     if (sessionsCache.length === 0) {
-        list.innerHTML = '<div style="color:#555;text-align:center;padding:10px;font-size:11px;">无活跃会话</div>';
+        list.innerHTML = '<div style="color:var(--c-text-faint);text-align:center;padding:10px;font-size:11px;">无活跃会话</div>';
         return;
     }
 
@@ -340,9 +514,9 @@ function renderSessions() {
             return `
             <div class="session-item stale" onclick="resumeStaleSession('${escapeHtml(s.id)}', '${escapeHtml(s.projectId)}')">
                 <div class="session-info">
-                    <span class="session-dot" style="background:#f0ad4e"></span>
+                    <span class="session-dot" style="background:var(--c-warn)"></span>
                     <span class="session-name">${name}</span>
-                    <span class="session-time" style="color:#f0ad4e">重启丢失·点击恢复</span>
+                    <span class="session-time" style="color:var(--c-warn)">重启丢失·点击恢复</span>
                 </div>
                 <button class="session-close" onclick="event.stopPropagation();killSession('${escapeHtml(s.id)}')" title="清除">&times;</button>
             </div>`;
@@ -367,6 +541,7 @@ async function resumeStaleSession(staleId, projectId) {
         currentProject = project;
         document.getElementById('projectTitle').textContent = project.name;
         document.getElementById('headerProjectPath').textContent = project.path;
+        document.getElementById('projectSwitchLabel').textContent = project.name;
     }
     document.getElementById('emptyState').classList.add('hidden');
     document.getElementById('terminalWrapper').classList.add('active');
@@ -386,6 +561,7 @@ function switchSession(sessionId, projectId) {
         currentProject = project;
         document.getElementById('projectTitle').textContent = project.name;
         document.getElementById('headerProjectPath').textContent = project.path;
+        document.getElementById('projectSwitchLabel').textContent = project.name;
     }
 
     document.getElementById('emptyState').classList.add('hidden');
@@ -413,30 +589,94 @@ async function loadProjects() {
     await loadSessions();
 }
 
-function renderProjects() {
+const GIT_URL_RE = /^(https?:\/\/|git@|ssh:\/\/).+/;
+
+function extractRepoName(url) {
+    return url.replace(/\.git$/, '').split('/').pop().split(':').pop();
+}
+
+function filterProjects(query) {
+    projectSearchQuery = query.trim();
+    if (GIT_URL_RE.test(projectSearchQuery)) {
+        const repoName = extractRepoName(projectSearchQuery);
+        const match = projectsCache.filter(p =>
+            p.name.toLowerCase() === repoName.toLowerCase()
+        );
+        if (match.length > 0) {
+            renderProjects(match, '已存在，回车切换');
+        } else {
+            renderProjects([], '回车开始 clone');
+        }
+    } else {
+        renderProjects();
+    }
+}
+
+function handleSearchClone(inputEl) {
+    const value = inputEl.value.trim();
+    if (!value) return;
+    if (GIT_URL_RE.test(value)) {
+        const repoName = extractRepoName(value);
+        const match = projectsCache.find(p =>
+            p.name.toLowerCase() === repoName.toLowerCase()
+        );
+        if (match) {
+            selectProject(match.id);
+            inputEl.value = '';
+            projectSearchQuery = '';
+            return;
+        }
+        performClone(inputEl, document.getElementById('sidebarCloneStatus'), false);
+    }
+}
+
+function renderProjects(overrideList, hintText) {
     const list = document.getElementById('projectList');
 
-    if (projectsCache.length === 0) {
-        list.innerHTML = '<div style="color:#666;text-align:center;padding:20px;font-size:12px;line-height:1.6;">将项目放在 ~/projects/ 下<br>即可自动发现<br><span style="color:#555;font-size:11px;">或在下方粘贴 git 地址 clone</span></div>';
+    let filtered;
+    if (overrideList !== undefined) {
+        filtered = overrideList;
+    } else if (projectSearchQuery && !GIT_URL_RE.test(projectSearchQuery)) {
+        const q = projectSearchQuery.toLowerCase();
+        filtered = projectsCache.filter(p => p.name.toLowerCase().includes(q));
+    } else {
+        filtered = projectsCache;
+    }
+
+    if (filtered.length === 0 && !hintText && projectsCache.length === 0) {
+        list.innerHTML = '<div style="color:var(--c-text-dim);text-align:center;padding:20px;font-size:12px;line-height:1.6;">将项目放在 ~/projects/ 下<br>即可自动发现<br><span style="color:var(--c-text-faint);font-size:11px;">或粘贴 git 地址回车 clone</span></div>';
         return;
     }
 
-    list.innerHTML = projectsCache.map(p => {
+    if (filtered.length === 0) {
+        const msg = hintText || '未找到匹配项目';
+        list.innerHTML = '<div style="color:var(--c-text-dim);text-align:center;padding:12px;font-size:12px;">' + escapeHtml(msg) + '</div>';
+        return;
+    }
+
+    let html = '';
+    if (hintText) {
+        html += '<div style="color:var(--c-accent);text-align:center;padding:6px;font-size:11px;">' + escapeHtml(hintText) + '</div>';
+    }
+
+    html += filtered.map(p => {
         const sessions = getProjectSessions(p.id);
+        const liveSessions = sessions.filter(s => !s.stale);
         const isActive = currentProject && currentProject.id === p.id;
-        const count = sessions.length;
+        const liveCount = liveSessions.length;
         const name = escapeHtml(p.name);
         const desc = escapeHtml(p.path);
         return `
         <div class="project-item ${isActive ? 'active' : ''}"
              onclick="selectProject('${escapeHtml(p.id)}')">
             <div class="project-name">
-                ${count > 0 ? '<span class="session-dot"></span>' : ''}${name}
-                ${count > 1 ? `<span class="session-count">${count}</span>` : ''}
+                ${liveCount > 0 ? '<span class="session-dot"></span>' : ''}${name}
+                ${liveCount > 1 ? `<span class="session-count">${liveCount}</span>` : ''}
             </div>
             <div class="project-desc">${desc}</div>
         </div>`;
     }).join('');
+    list.innerHTML = html;
 }
 
 // ---- 项目选择 ----
@@ -448,6 +688,7 @@ async function selectProject(projectId) {
 
     document.getElementById('projectTitle').textContent = currentProject.name;
     document.getElementById('headerProjectPath').textContent = currentProject.path;
+    document.getElementById('projectSwitchLabel').textContent = currentProject.name;
 
     document.getElementById('emptyState').classList.add('hidden');
     document.getElementById('terminalWrapper').classList.add('active');
@@ -475,16 +716,12 @@ async function selectProject(projectId) {
 
 // ---- Clone ----
 
-async function cloneRepo() {
-    const input = document.getElementById('cloneInput');
-    const status = document.getElementById('cloneStatus');
-    const url = input.value.trim();
+async function performClone(inputEl, statusEl, autoClose) {
+    const url = inputEl.value.trim();
     if (!url) return;
-
-    status.style.color = '#4a90e2';
-    status.textContent = 'Cloning...';
-    input.disabled = true;
-
+    statusEl.style.color = 'var(--c-accent)';
+    statusEl.textContent = 'Cloning...';
+    inputEl.disabled = true;
     try {
         const res = await authFetch('/api/clone', {
             method: 'POST',
@@ -493,35 +730,189 @@ async function cloneRepo() {
         });
         const data = await res.json();
         if (data.success) {
-            status.style.color = '#4caf50';
-            status.textContent = 'Done';
-            input.value = '';
+            statusEl.style.color = 'var(--c-green)';
+            statusEl.textContent = 'Done';
+            inputEl.value = '';
+            projectSearchQuery = '';
             loadProjects();
+            if (autoClose) setTimeout(() => closeAllPopups(), 1500);
         } else {
-            status.style.color = '#ff6b6b';
-            status.textContent = data.error;
+            statusEl.style.color = 'var(--c-red)';
+            statusEl.textContent = data.error;
         }
     } catch (e) {
-        status.style.color = '#ff6b6b';
-        status.textContent = e.message;
+        statusEl.style.color = 'var(--c-red)';
+        statusEl.textContent = e.message;
     }
-    input.disabled = false;
-    setTimeout(() => { status.textContent = ''; }, 5000);
+    inputEl.disabled = false;
+    setTimeout(() => { statusEl.textContent = ''; }, 5000);
+}
+
+// ---- 项目快捷切换下拉 ----
+
+function toggleProjectDropdown() {
+    const dropdown = document.getElementById('projectDropdown');
+    const wasOpen = dropdown.classList.contains('open');
+    closeAllPopups();
+    if (!wasOpen) {
+        dropdown.classList.add('open');
+        renderProjectDropdown(projectsCache);
+        document.getElementById('projectDropdownSearch').value = '';
+        document.getElementById('projectDropdownSearch').focus();
+    }
+}
+
+function renderProjectDropdown(projects, hintText) {
+    const list = document.getElementById('projectDropdownList');
+    if (projects.length === 0) {
+        const msg = hintText || '无匹配项目';
+        list.innerHTML = '<div style="padding:12px;text-align:center;color:var(--c-text-dim);font-size:12px;">' + escapeHtml(msg) + '</div>';
+        return;
+    }
+    let html = '';
+    if (hintText) {
+        html += '<div style="color:var(--c-accent);text-align:center;padding:6px;font-size:11px;">' + escapeHtml(hintText) + '</div>';
+    }
+    html += projects.map(p => {
+        const isActive = currentProject && currentProject.id === p.id;
+        const liveSessions = getProjectSessions(p.id).filter(s => !s.stale);
+        const name = escapeHtml(p.name);
+        return `<div class="project-dropdown-item ${isActive ? 'active' : ''}"
+                     onclick="selectProject('${escapeHtml(p.id)}');closeAllPopups()">
+                    ${liveSessions.length > 0 ? '<span class="session-dot"></span>' : ''}
+                    ${name}
+                    ${liveSessions.length > 1 ? '<span class="session-count">' + liveSessions.length + '</span>' : ''}
+                </div>`;
+    }).join('');
+    list.innerHTML = html;
+}
+
+function filterProjectDropdown(query) {
+    const q = query.trim();
+    if (GIT_URL_RE.test(q)) {
+        const repoName = extractRepoName(q);
+        const match = projectsCache.filter(p =>
+            p.name.toLowerCase() === repoName.toLowerCase()
+        );
+        if (match.length > 0) {
+            renderProjectDropdown(match, '已存在，回车仍可 clone');
+        } else {
+            renderProjectDropdown([], '回车开始 clone');
+        }
+    } else {
+        const filtered = q ? projectsCache.filter(p =>
+            p.name.toLowerCase().includes(q.toLowerCase())
+        ) : projectsCache;
+        renderProjectDropdown(filtered);
+    }
+}
+
+function handleDropdownClone(inputEl) {
+    const value = inputEl.value.trim();
+    if (!value || !GIT_URL_RE.test(value)) return;
+    performClone(inputEl, document.getElementById('dropdownCloneStatus'), true);
+}
+
+// ---- 弹出层管理 ----
+
+function closeAllPopups() {
+    const pd = document.getElementById('projectDropdown');
+    const um = document.getElementById('userMenu');
+    if (pd) pd.classList.remove('open');
+    if (um) um.classList.remove('open');
+}
+
+// ---- 仪表板面板 ----
+
+function showDashboardPanel() {
+    if (!currentProject) return;
+    document.getElementById('dashboardProjectName').textContent = currentProject.name;
+    document.getElementById('dashboardProjectPath').textContent = currentProject.path;
+
+    // Active sessions for this project
+    const projectSessions = getProjectSessions(currentProject.id);
+    const sessionsEl = document.getElementById('dashboardSessions');
+    if (projectSessions.length === 0) {
+        sessionsEl.innerHTML = '<div style="color:var(--c-text-dim);font-size:12px;padding:8px;">无活跃会话</div>';
+    } else {
+        sessionsEl.innerHTML = projectSessions.map(s => {
+            const name = escapeHtml(currentProject.name);
+            return `<div class="dashboard-session-item" onclick="switchSession('${escapeHtml(s.id)}', '${escapeHtml(s.projectId)}')">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span class="session-dot" ${s.stale ? 'style="background:var(--c-warn)"' : ''}></span>
+                            <span>${name}</span>
+                            <span style="color:var(--c-text-dim);font-size:10px;">${formatTime(s.createdAt)}</span>
+                        </div>
+                        <button class="session-close" onclick="event.stopPropagation();killSession('${escapeHtml(s.id)}')">&times;</button>
+                    </div>`;
+        }).join('');
+    }
+
+    refreshHealth();
+
+    document.getElementById('terminalWrapper').classList.remove('active');
+    document.getElementById('emptyState').classList.add('hidden');
+    document.getElementById('dashboardPanel').classList.add('active');
+}
+
+function hideDashboardPanel() {
+    document.getElementById('dashboardPanel').classList.remove('active');
+}
+
+function updateHealthUI(data) {
+    // Status bar
+    const el1 = document.getElementById('statusSessions');
+    const el2 = document.getElementById('statusMemory');
+    if (el1) el1.textContent = `${data.sessions} sessions`;
+    if (el2) el2.textContent = `${data.memory.rss}MB`;
+    // Health panel
+    const u = document.getElementById('healthUptime');
+    const s = document.getElementById('healthSessions');
+    const c = document.getElementById('healthCpu');
+    const r = document.getElementById('healthRss');
+    const hp = document.getElementById('healthHeap');
+    const dk = document.getElementById('healthDisk');
+    if (u) u.textContent = formatUptime(data.uptime);
+    if (s) s.textContent = data.sessions;
+    if (c && data.cpu) c.textContent = `${data.cpu.load1m} (${data.cpu.cores} cores)`;
+    if (r) r.textContent = `${data.memory.rss} MB`;
+    if (hp) hp.textContent = `${data.memory.heap} MB`;
+    if (dk && data.disk) dk.textContent = `${data.disk.used}/${data.disk.total} GB (${data.disk.percent})`;
+    // Dashboard panel
+    const du = document.getElementById('dashUptime');
+    const ds = document.getElementById('dashSessions');
+    const dm = document.getElementById('dashMemory');
+    const dd = document.getElementById('dashDisk');
+    if (du) du.textContent = formatUptime(data.uptime);
+    if (ds) ds.textContent = data.sessions;
+    if (dm) dm.textContent = data.memory.rss + ' MB';
+    if (dd && data.disk) dd.textContent = data.disk.used + '/' + data.disk.total + ' GB';
 }
 
 // ---- 侧边栏 ----
 
 function toggleSidebar() {
+    const isMobile = window.innerWidth <= 768;
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('sidebarOverlay');
-    const isOpen = sidebar.classList.toggle('open');
-    overlay.classList.toggle('active', isOpen);
+    if (isMobile) {
+        const isOpen = sidebar.classList.toggle('open');
+        overlay.classList.toggle('active', isOpen);
+    } else {
+        sidebar.classList.toggle('collapsed');
+        localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+    }
     setTimeout(doFit, 300);
 }
 
 function closeSidebar() {
-    document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('sidebarOverlay').classList.remove('active');
+    const isMobile = window.innerWidth <= 768;
+    const sidebar = document.getElementById('sidebar');
+    if (isMobile) {
+        sidebar.classList.remove('open');
+        document.getElementById('sidebarOverlay').classList.remove('active');
+    }
+    // Desktop: don't auto-close sidebar on project select
     setTimeout(doFit, 300);
 }
 
@@ -551,23 +942,7 @@ async function refreshHealth() {
     try {
         const res = await authFetch('/api/health');
         const data = await res.json();
-        const el1 = document.getElementById('statusSessions');
-        const el2 = document.getElementById('statusMemory');
-        if (el1) el1.textContent = `${data.sessions} sessions`;
-        if (el2) el2.textContent = `${data.memory.rss}MB`;
-        // 健康面板详情
-        const u = document.getElementById('healthUptime');
-        const s = document.getElementById('healthSessions');
-        const c = document.getElementById('healthCpu');
-        const r = document.getElementById('healthRss');
-        const hp = document.getElementById('healthHeap');
-        const dk = document.getElementById('healthDisk');
-        if (u) u.textContent = formatUptime(data.uptime);
-        if (s) s.textContent = data.sessions;
-        if (c && data.cpu) c.textContent = `${data.cpu.load1m} (${data.cpu.cores} cores)`;
-        if (r) r.textContent = `${data.memory.rss} MB`;
-        if (hp) hp.textContent = `${data.memory.heap} MB`;
-        if (dk && data.disk) dk.textContent = `${data.disk.used}/${data.disk.total} GB (${data.disk.percent})`;
+        updateHealthUI(data);
     } catch {}
 }
 
@@ -583,6 +958,107 @@ function initApp() {
     connectWebSocket();
     refreshHealth();
     setInterval(refreshHealth, 10000);
+}
+
+// ---- 批量关闭会话 ----
+
+async function killAllSessions() {
+    if (!confirm('确定关闭所有会话？')) return;
+    const ids = sessionsCache.map(s => s.id);
+    for (const id of ids) {
+        try { await authFetch(`/api/sessions/${id}`, { method: 'DELETE' }); } catch {}
+    }
+    loadSessions();
+}
+
+// ---- Escape 键关闭弹窗 ----
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeAllPopups();
+        closeChangePassword();
+        document.getElementById('healthPanel').classList.remove('open');
+    }
+});
+
+// ---- 键盘快捷键 ----
+
+document.addEventListener('keydown', (e) => {
+    // 如果焦点在输入框内，不拦截
+    const tag = document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    // 终端获焦时只拦截 Ctrl/Cmd 组合键
+    const mod = e.metaKey || e.ctrlKey;
+    if (!mod) return;
+
+    if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        toggleProjectDropdown();
+    } else if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        if (currentProject) reconnect(false);
+    }
+});
+
+// ---- 空闲警告 ----
+
+const IDLE_WARN_MS = 25 * 60 * 1000; // 25 分钟
+
+function resetIdleWarning() {
+    clearIdleWarning();
+    if (!currentSessionId) return;
+    idleWarningTimer = setTimeout(() => {
+        showToast('当前会话即将因空闲被自动清理（30分钟限制）');
+    }, IDLE_WARN_MS);
+}
+
+function clearIdleWarning() {
+    if (idleWarningTimer) { clearTimeout(idleWarningTimer); idleWarningTimer = null; }
+}
+
+// ---- 剪贴板同步（远程图片 → Mac 系统剪贴板）----
+
+// 剪贴板图片同步：捕获阶段拦截 paste 事件
+document.addEventListener('paste', (e) => {
+    if (!currentSessionId) return;
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items) return;
+    for (const item of items) {
+        if (item.type.startsWith('image/')) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            syncClipboardImage(item.getAsFile());
+            return;
+        }
+    }
+}, true);
+
+let clipboardSyncing = false;
+async function syncClipboardImage(blob) {
+    if (clipboardSyncing) return;
+    clipboardSyncing = true;
+    const reader = new FileReader();
+    reader.onload = async () => {
+        const base64 = reader.result.split(',')[1];
+        showToast('正在同步剪贴板...');
+        try {
+            const res = await authFetch('/api/clipboard', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: base64 })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast('剪贴板已同步，请再次粘贴');
+            } else {
+                showToast('同步失败: ' + data.error);
+            }
+        } catch (err) {
+            showToast('同步失败: ' + err.message);
+        }
+        clipboardSyncing = false;
+    };
+    reader.readAsDataURL(blob);
 }
 
 // 启动时检查认证状态

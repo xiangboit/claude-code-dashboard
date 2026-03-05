@@ -54,10 +54,28 @@ Map<sessionId, {
 
 ### 认证
 
-- SHA256 密码哈希，Bearer token 认证
-- Token 存内存 Map（重启需重新登录），用户数据存 SQLite
+- scrypt 密码哈希（兼容旧 SHA256 自动迁移），Bearer token 认证
+- Token 存 SQLite（7 天有效期），用户数据存 SQLite
 - WebSocket 通过 URL query `?token=xxx` 传递认证
 - 首次无用户时显示注册页，之后显示登录页
+
+### 统一搜索/克隆
+
+侧边栏搜索框和顶栏项目下拉搜索框均为双用途输入：
+- 输入普通文字 → 搜索过滤项目列表
+- 输入 git URL（`https://`、`git@`、`ssh://`）→ 提示克隆，回车执行
+- git URL 匹配到已有项目时 → 回车直接切换到该项目
+- 正则检测：`/^(https?:\/\/|git@|ssh:\/\/).+/`
+- 仓库名提取：`extractRepoName()` 从 URL 末尾提取
+
+### 远程剪贴板同步
+
+解决远程设备截图无法粘贴给 Claude Code 的问题：
+- **原因**：Claude Code 读取的是服务器（Mac Mini）的系统剪贴板，远程浏览器的剪贴板内容无法直接到达
+- **方案**：前端拦截 paste 事件（捕获阶段），检测到图片后上传到服务器，服务器通过 `osascript` 写入 macOS 系统剪贴板
+- **流程**：远程截图 → Cmd/Ctrl+V → 图片上传 → 写入 Mac 剪贴板 → toast 提示"已同步" → 再次 Cmd/Ctrl+V → Claude Code 正常读取
+- **API**：`POST /api/clipboard` 接收 base64 PNG，写入 macOS 剪贴板
+- **限制**：仅支持图片；body 上限 10MB；需 macOS（依赖 osascript）
 
 ### WebSocket 消息协议
 
@@ -104,6 +122,21 @@ CREATE TABLE project_stats (
 );
 ```
 
+## REST API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/register | 注册 |
+| POST | /api/login | 登录 |
+| GET | /api/auth/status | 认证状态 |
+| POST | /api/change-password | 修改密码 |
+| GET | /api/projects | 项目列表 |
+| POST | /api/clone | 克隆 git 仓库 |
+| GET | /api/sessions | 会话列表 |
+| DELETE | /api/sessions/:id | 关闭会话 |
+| GET | /api/health | 健康检查 |
+| POST | /api/clipboard | 剪贴板同步（base64 PNG → macOS 剪贴板）|
+
 ## 关键约束
 
 - 启动 claude 时必须 `delete env.CLAUDECODE`，否则 Claude Code 检测嵌套会话拒绝启动
@@ -111,6 +144,8 @@ CREATE TABLE project_stats (
 - 所有 innerHTML 拼接必须经过 `escapeHtml()` 防 XSS
 - 前端所有 API 请求使用 `authFetch()` 包装，401 自动跳转登录
 - 优雅停机时先 kill 所有 PTY 进程，再 close db
+- express.json body 上限 10MB（支持剪贴板图片上传）
+- 剪贴板同步依赖 macOS `osascript`，仅 macOS 服务器可用
 
 ## 开发命令
 

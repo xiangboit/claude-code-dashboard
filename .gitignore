@@ -5,6 +5,7 @@ dashboard.log
 .codex/
 .cursor/
 .memorix/
+_bmad/
 dashboard.db
 dashboard.db-wal
 dashboard.db-shm
