@@ -1280,8 +1280,8 @@
             <div class="header-right">
                 <div class="session-actions" id="sessionActions">
                     <button class="btn btn-resume" onclick="reconnect(true)">恢复对话</button>
-                    <button class="btn btn-new" onclick="reconnect(false)">新对话</button>
                 </div>
+                <button class="btn btn-new" id="newSessionBtn" onclick="reconnect(false)" style="display:none" title="新建会话 (Ctrl/⌘+N)">+ 新对话</button>
                 <button class="btn btn-kill" id="killBtn" onclick="killSession()">关闭会话</button>
                 <div class="font-size-controls" id="fontSizeControls" style="display:none">
                     <button class="btn-font" onclick="changeFontSize(-1)" title="缩小字体">A-</button>

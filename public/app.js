@@ -387,6 +387,7 @@ function connectWebSocket() {
             hideSessionActions();
             document.getElementById('killBtn').style.display = '';
             document.getElementById('fontSizeControls').style.display = '';
+            document.getElementById('newSessionBtn').style.display = '';
             resetIdleWarning();
             loadSessions();
         } else if (msg.type === 'attached') {
@@ -394,6 +395,7 @@ function connectWebSocket() {
             hideSessionActions();
             document.getElementById('killBtn').style.display = '';
             document.getElementById('fontSizeControls').style.display = '';
+            document.getElementById('newSessionBtn').style.display = '';
             resetIdleWarning();
             loadSessions();
         } else if (msg.type === 'detached') {
@@ -692,6 +694,7 @@ async function selectProject(projectId) {
 
     document.getElementById('emptyState').classList.add('hidden');
     document.getElementById('terminalWrapper').classList.add('active');
+    document.getElementById('newSessionBtn').style.display = '';
     hideSessionActions();
 
     renderProjects();
