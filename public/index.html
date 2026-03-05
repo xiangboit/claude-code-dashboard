@@ -449,6 +449,7 @@
             flex: 1;
             overflow: hidden;
             display: none;
+            position: relative;
         }
 
         .terminal-wrapper.active {
@@ -1117,6 +1118,103 @@
             display: block;
         }
 
+        /* ===== 粒子叠加层 ===== */
+        .particle-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            opacity: 0.7;
+            transition: opacity 0.5s ease;
+        }
+        .particle-canvas.hidden {
+            opacity: 0;
+        }
+
+        /* ===== 终端状态栏 ===== */
+        .terminal-status-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 12px;
+            background: rgba(30, 30, 30, 0.85);
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 11px;
+            font-family: Monaco, Menlo, monospace;
+            color: var(--c-text-muted);
+            z-index: 5;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+        .terminal-status-bar.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        [data-theme="light"] .terminal-status-bar {
+            background: rgba(240, 242, 245, 0.9);
+            border-top: 1px solid rgba(0, 0, 0, 0.08);
+        }
+        .tsb-left, .tsb-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .tsb-activity-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--c-green);
+            animation: tsb-breathe 2s ease-in-out infinite;
+        }
+        .tsb-activity-dot.idle {
+            background: var(--c-text-dim);
+            animation: none;
+        }
+        @keyframes tsb-breathe {
+            0%, 100% { opacity: 0.4; transform: scale(0.85); }
+            50% { opacity: 1; transform: scale(1.1); }
+        }
+        .tsb-project {
+            color: var(--c-accent);
+            font-weight: 500;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .tsb-timer {
+            color: var(--c-text-dim);
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.5px;
+        }
+        .tsb-toggle-fx {
+            background: none;
+            border: none;
+            color: var(--c-text-dim);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 0 2px;
+            line-height: 1;
+            transition: color 0.2s;
+        }
+        .tsb-toggle-fx:hover {
+            color: var(--c-accent);
+        }
+        .tsb-toggle-fx.off {
+            opacity: 0.4;
+        }
+
         /* 主题切换按钮 */
         .theme-toggle {
             background: none;
@@ -1257,7 +1355,8 @@
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
     <div class="toast-container" id="toastContainer"></div>
 
-    <div class="main-content">
+    <div class="main-content" style="position:relative;">
+        <canvas id="particleCanvas" class="particle-canvas"></canvas>
         <div class="reconnect-banner" id="reconnectBanner">正在重新连接...</div>
         <div class="header">
             <div class="header-left">
@@ -1338,6 +1437,16 @@
 
         <div class="terminal-wrapper" id="terminalWrapper">
             <div id="terminal"></div>
+            <div id="terminalStatusBar" class="terminal-status-bar">
+                <div class="tsb-left">
+                    <span class="tsb-activity-dot" id="tsbActivityDot"></span>
+                    <span class="tsb-project" id="tsbProject"></span>
+                </div>
+                <div class="tsb-right">
+                    <span class="tsb-timer" id="tsbTimer">00:00:00</span>
+                    <button class="tsb-toggle-fx" id="tsbToggleFx" title="Toggle effects">&#10024;</button>
+                </div>
+            </div>
         </div>
     </div>
 

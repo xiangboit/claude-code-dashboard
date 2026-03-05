@@ -14,6 +14,16 @@ let idleWarningTimer = null;
 let authToken = localStorage.getItem('authToken') || '';
 let currentUser = localStorage.getItem('currentUser') || '';
 
+// ---- 粒子 & 状态栏状态 ----
+let particlesEnabled = localStorage.getItem('particlesEnabled') !== 'false';
+let sessionCreatedAt = null;
+let timerInterval = null;
+let particleAnimId = null;
+let particles = [];
+let activityTimeout = null;
+const PARTICLE_COUNT = window.innerWidth <= 768 ? 25 : 50;
+const STATUS_BAR_HEIGHT = 24;
+
 // ---- 主题切换 ----
 
 function getThemeColor(varName) {
@@ -275,6 +285,129 @@ function showToast(message) {
     }, 4000);
 }
 
+// ---- 终端状态栏 ----
+
+function showTerminalStatusBar(projectName, createdAt) {
+    sessionCreatedAt = createdAt;
+    document.getElementById('tsbProject').textContent = projectName;
+    document.getElementById('tsbActivityDot').classList.remove('idle');
+    document.getElementById('terminalStatusBar').classList.add('visible');
+    startTimer();
+    requestAnimationFrame(() => doFit());
+}
+
+function hideTerminalStatusBar() {
+    document.getElementById('terminalStatusBar').classList.remove('visible');
+    stopTimer();
+    sessionCreatedAt = null;
+    requestAnimationFrame(() => doFit());
+}
+
+function startTimer() {
+    stopTimer();
+    updateTimerDisplay();
+    timerInterval = setInterval(updateTimerDisplay, 1000);
+}
+
+function stopTimer() {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+
+function updateTimerDisplay() {
+    if (!sessionCreatedAt) return;
+    const elapsed = Math.floor((Date.now() - sessionCreatedAt) / 1000);
+    const h = Math.floor(elapsed / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+    const el = document.getElementById('tsbTimer');
+    if (el) el.textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+function setActivityIdle(idle) {
+    const dot = document.getElementById('tsbActivityDot');
+    if (dot) dot.classList.toggle('idle', idle);
+}
+
+// ---- 粒子系统 ----
+
+function createParticle(w, h) {
+    return {
+        x: Math.random() * w, y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.3, vy: (Math.random() - 0.5) * 0.3,
+        radius: Math.random() * 1.5 + 0.5,
+        baseAlpha: Math.random() * 0.3 + 0.1, alphaRange: Math.random() * 0.15 + 0.05,
+        phase: Math.random() * Math.PI * 2, phaseSpeed: Math.random() * 0.01 + 0.005
+    };
+}
+
+function initParticles() {
+    if (!particlesEnabled) return;
+    const canvas = document.getElementById('particleCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    let width, height;
+    function resize() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        width = canvas.width = rect.width;
+        height = canvas.height = rect.height;
+    }
+    let resizeTimer = null;
+    function debouncedResize() { if (resizeTimer) clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 100); }
+    resize();
+    window.addEventListener('resize', debouncedResize);
+    particles = [];
+    for (let i = 0; i < PARTICLE_COUNT; i++) particles.push(createParticle(width, height));
+
+    const isLight = () => document.documentElement.getAttribute('data-theme') === 'light';
+
+    function animate() {
+        if (!particlesEnabled) { particleAnimId = null; return; }
+        if (document.hidden) { particleAnimId = requestAnimationFrame(animate); return; }
+        ctx.clearRect(0, 0, width, height);
+        const light = isLight();
+        const r = light ? 58 : 120, g = light ? 123 : 200, b = light ? 213 : 255;
+        for (const p of particles) {
+            p.x += p.vx; p.y += p.vy;
+            if (p.x < -10) p.x = width + 10; if (p.x > width + 10) p.x = -10;
+            if (p.y < -10) p.y = height + 10; if (p.y > height + 10) p.y = -10;
+            p.phase += p.phaseSpeed;
+            const alpha = p.baseAlpha + Math.sin(p.phase) * p.alphaRange;
+            const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius * 3);
+            grad.addColorStop(0, `rgba(${r},${g},${b},${alpha * 0.5})`);
+            grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.radius * 3, 0, Math.PI * 2); ctx.fillStyle = grad; ctx.fill();
+            ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`; ctx.fill();
+        }
+        for (let i = 0; i < particles.length; i++) {
+            for (let j = i + 1; j < particles.length; j++) {
+                const dx = particles[i].x - particles[j].x, dy = particles[i].y - particles[j].y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 120) {
+                    ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y);
+                    ctx.strokeStyle = `rgba(${r},${g},${b},${(1 - dist / 120) * 0.08})`; ctx.lineWidth = 0.5; ctx.stroke();
+                }
+            }
+        }
+        particleAnimId = requestAnimationFrame(animate);
+    }
+    particleAnimId = requestAnimationFrame(animate);
+}
+
+function toggleParticles() {
+    particlesEnabled = !particlesEnabled;
+    localStorage.setItem('particlesEnabled', particlesEnabled);
+    const canvas = document.getElementById('particleCanvas');
+    const btn = document.getElementById('tsbToggleFx');
+    if (particlesEnabled) {
+        canvas.classList.remove('hidden'); btn.classList.remove('off');
+        if (!particleAnimId) initParticles();
+    } else {
+        canvas.classList.add('hidden'); btn.classList.add('off');
+        if (particleAnimId) { cancelAnimationFrame(particleAnimId); particleAnimId = null; }
+    }
+}
+
 // ---- 终端 ----
 
 function changeFontSize(delta) {
@@ -338,8 +471,10 @@ function doFit() {
 
     const rect = wrapper.getBoundingClientRect();
     const termEl = document.getElementById('terminal');
+    const statusBar = document.getElementById('terminalStatusBar');
+    const barHeight = statusBar && statusBar.classList.contains('visible') ? STATUS_BAR_HEIGHT : 0;
     termEl.style.width = rect.width + 'px';
-    termEl.style.height = rect.height + 'px';
+    termEl.style.height = (rect.height - barHeight) + 'px';
 
     fitAddon.fit();
 
@@ -380,6 +515,9 @@ function connectWebSocket() {
         const msg = JSON.parse(event.data);
         if (msg.type === 'output') {
             term.write(msg.data);
+            setActivityIdle(false);
+            if (activityTimeout) clearTimeout(activityTimeout);
+            activityTimeout = setTimeout(() => setActivityIdle(true), 5000);
         } else if (msg.type === 'replay') {
             term.write(msg.data);
         } else if (msg.type === 'started') {
@@ -390,6 +528,7 @@ function connectWebSocket() {
             document.getElementById('newSessionBtn').style.display = '';
             resetIdleWarning();
             loadSessions();
+            showTerminalStatusBar(currentProject ? currentProject.name : (msg.projectId || ''), msg.createdAt || Date.now());
         } else if (msg.type === 'attached') {
             currentSessionId = msg.sessionId;
             hideSessionActions();
@@ -398,6 +537,7 @@ function connectWebSocket() {
             document.getElementById('newSessionBtn').style.display = '';
             resetIdleWarning();
             loadSessions();
+            showTerminalStatusBar(currentProject ? currentProject.name : (msg.projectId || ''), msg.createdAt || Date.now());
         } else if (msg.type === 'detached') {
             term.writeln('\r\n\x1b[33m--- 会话已被其他连接接管 ---\x1b[0m');
         } else if (msg.type === 'exit') {
@@ -406,6 +546,7 @@ function connectWebSocket() {
             document.getElementById('fontSizeControls').style.display = 'none';
             clearIdleWarning();
             showSessionActions();
+            hideTerminalStatusBar();
             loadSessions().then(() => showDashboardPanel());
         } else if (msg.type === 'notify') {
             showToast(msg.message);
@@ -961,6 +1102,15 @@ function initApp() {
     connectWebSocket();
     refreshHealth();
     setInterval(refreshHealth, 10000);
+    // 粒子系统
+    initParticles();
+    const fxBtn = document.getElementById('tsbToggleFx');
+    if (fxBtn) fxBtn.addEventListener('click', toggleParticles);
+    if (!particlesEnabled) {
+        const canvas = document.getElementById('particleCanvas');
+        if (canvas) canvas.classList.add('hidden');
+        if (fxBtn) fxBtn.classList.add('off');
+    }
 }
 
 // ---- 批量关闭会话 ----

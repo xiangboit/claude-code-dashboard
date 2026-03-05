@@ -10,7 +10,7 @@ const pty = require('node-pty');
 const Database = require('better-sqlite3');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -548,7 +548,7 @@ wss.on('connection', (ws, req) => {
       if (currentSessionId) detachSession(currentSessionId);
       currentSessionId = sessionId;
       attachSession(sessionId, ws);
-      ws.send(JSON.stringify({ type: 'started', sessionId }));
+      ws.send(JSON.stringify({ type: 'started', sessionId, createdAt: sessions.get(sessionId).createdAt, projectId: msg.projectId }));
 
     } else if (msg.type === 'attach') {
       const session = sessions.get(msg.sessionId);
@@ -569,7 +569,7 @@ wss.on('connection', (ws, req) => {
       if (session.buffer) {
         ws.send(JSON.stringify({ type: 'replay', data: session.buffer }));
       }
-      ws.send(JSON.stringify({ type: 'attached', sessionId: msg.sessionId }));
+      ws.send(JSON.stringify({ type: 'attached', sessionId: msg.sessionId, createdAt: session.createdAt, projectId: session.projectId }));
 
     } else if (msg.type === 'input') {
       const session = currentSessionId && sessions.get(currentSessionId);
