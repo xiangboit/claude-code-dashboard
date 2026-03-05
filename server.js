@@ -16,7 +16,10 @@ app.use(express.json({ limit: '10mb' }));
 
 // ---- 数据库 ----
 
-const dbPath = process.env.DASHBOARD_DB || path.join(__dirname, 'dashboard.db');
+// 数据库默认存放在 ~/.claude-dashboard/，避免被 Claude 会话读取
+const defaultDbDir = path.join(os.homedir(), '.claude-dashboard');
+if (!fs.existsSync(defaultDbDir)) fs.mkdirSync(defaultDbDir, { recursive: true });
+const dbPath = process.env.DASHBOARD_DB || path.join(defaultDbDir, 'dashboard.db');
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 

@@ -122,7 +122,7 @@ function showLogin(hasUsers) {
 function showApp() {
     document.getElementById('loginOverlay').style.display = 'none';
     document.getElementById('appMain').style.display = 'flex';
-    document.getElementById('currentUserName').textContent = currentUser;
+    document.getElementById('currentUserLabel').textContent = currentUser;
     // Restore sidebar collapsed state
     if (localStorage.getItem('sidebarCollapsed') === 'true' && window.innerWidth > 768) {
         document.getElementById('sidebar').classList.add('collapsed');

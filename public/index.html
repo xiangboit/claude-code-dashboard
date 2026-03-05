@@ -1287,7 +1287,8 @@
                     <button class="btn-font" onclick="changeFontSize(-1)" title="缩小字体">A-</button>
                     <button class="btn-font" onclick="changeFontSize(1)" title="放大字体">A+</button>
                 </div>
-                <span class="user-info" id="currentUserName" onclick="event.stopPropagation();toggleUserMenu()" title="点击管理">
+                <span class="user-info" onclick="event.stopPropagation();toggleUserMenu()" title="点击管理">
+                    <span id="currentUserLabel"></span>
                     <div class="user-menu" id="userMenu">
                         <div class="user-menu-item" onclick="event.stopPropagation();showChangePassword()">修改密码</div>
                         <div class="user-menu-item danger" onclick="event.stopPropagation();logout()">退出登录</div>

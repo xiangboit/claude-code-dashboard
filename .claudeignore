@@ -1,0 +1,7 @@
+# 防止 Claude 会话读取 dashboard 敏感文件
+server.js
+dashboard.db
+*.db
+*.db-wal
+*.db-shm
+.claude-dashboard/
