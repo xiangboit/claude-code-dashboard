@@ -1,0 +1,7 @@
+node_modules/
+dashboard.log
+.claude/
+.agent/
+.codex/
+.cursor/
+.memorix/

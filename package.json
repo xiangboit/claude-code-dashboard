@@ -1,0 +1,16 @@
+{
+  "name": "claude-code-dashboard",
+  "version": "1.0.0",
+  "description": "Claude Code Remote Dashboard with Project Quick Launch",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-pty": "^1.2.0-beta.11",
+    "node-ssh": "^13.1.0",
+    "ws": "^8.14.2"
+  }
+}
