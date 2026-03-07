@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "dashboard": {
+      "command": "node",
+      "args": ["/ABSOLUTE/PATH/TO/claude-code-dashboard/mcp-server.mjs"],
+      "env": {
+        "DASHBOARD_URL": "http://localhost:3000",
+        "DASHBOARD_API_KEY": "your-secret-key"
+      }
+    }
+  }
+}

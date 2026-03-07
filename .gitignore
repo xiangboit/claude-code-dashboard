@@ -12,3 +12,4 @@ dashboard.db-shm
 test.db
 test.db-wal
 test.db-shm
+.mcp.json
