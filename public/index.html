@@ -765,6 +765,39 @@
             color: var(--c-text-faint);
         }
 
+        .modal-field textarea {
+            width: 100%;
+            box-sizing: border-box;
+            background: var(--c-input-bg);
+            border: 1px solid var(--c-border-light);
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: var(--c-text);
+            font-size: 13px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            resize: vertical;
+        }
+        .modal-field textarea:focus {
+            outline: none;
+            border-color: var(--c-accent);
+        }
+        .modal-field select {
+            width: 100%;
+            box-sizing: border-box;
+            background: var(--c-input-bg);
+            border: 1px solid var(--c-border-light);
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: var(--c-text);
+            font-size: 13px;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        .modal-field select:focus {
+            outline: none;
+            border-color: var(--c-accent);
+        }
+
         .modal-actions {
             display: flex;
             gap: 10px;
@@ -796,6 +829,140 @@
             margin-top: 10px;
             min-height: 16px;
         }
+
+        .modal-field label {
+            display: block;
+            font-size: 12px;
+            color: var(--c-text-muted);
+            margin-bottom: 4px;
+        }
+
+        .modal-field .hint {
+            font-size: 11px;
+            color: var(--c-text-dim);
+            margin-top: 3px;
+        }
+
+        .modal-card.wide {
+            width: 440px;
+        }
+
+        .task-radio-group {
+            display: flex;
+            gap: 16px;
+        }
+        .task-radio-group label {
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: var(--c-text-dim);
+            cursor: pointer;
+        }
+        .task-cron-hint {
+            font-size: 10px;
+            color: var(--c-text-dim);
+            margin-top: 4px;
+        }
+        .task-runs-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .task-log-viewer {
+            background: #1a1a2e;
+            border: 1px solid var(--c-border);
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 11px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            max-height: 300px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: #e0e0e0;
+            margin-top: 8px;
+        }
+        .task-detail-info {
+            font-size: 12px;
+            color: var(--c-text-dim);
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+        .task-detail-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .task-detail-actions .btn {
+            font-size: 11px;
+            padding: 4px 12px;
+        }
+
+        .task-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        .task-status-dot.running { background: var(--c-green); }
+        .task-status-dot.enabled { background: var(--c-accent); }
+        .task-status-dot.disabled { background: var(--c-text-dim); }
+
+        .task-meta {
+            font-size: 11px;
+            color: var(--c-text-dim);
+        }
+
+        .task-actions {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .task-actions button {
+            background: none;
+            border: 1px solid var(--c-border);
+            color: var(--c-text-muted);
+            border-radius: 4px;
+            padding: 3px 8px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .task-actions button:hover {
+            color: var(--c-text);
+            background: var(--c-surface-hover);
+        }
+
+        .run-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .run-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--c-border-light);
+            font-size: 12px;
+        }
+
+        .run-status {
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 500;
+        }
+
+        .run-status.completed { background: var(--c-green); color: #fff; }
+        .run-status.running { background: var(--c-accent); color: #fff; }
+        .run-status.failed { background: var(--c-red); color: #fff; }
+        .run-status.cancelled { background: var(--c-text-dim); color: #fff; }
+        .run-status.pending { background: var(--c-warn); color: #000; }
 
         /* 健康面板 */
         .health-panel {
@@ -1382,6 +1549,7 @@
                 </div>
                 <button class="btn btn-new" id="newSessionBtn" onclick="reconnect(false)" style="display:none" title="新建会话 (Ctrl/⌘+N)">+ 新对话</button>
                 <button class="btn btn-kill" id="killBtn" onclick="killSession()">关闭会话</button>
+                <button class="btn" id="taskPanelBtn" onclick="toggleTaskPanel()" style="padding:4px 10px;font-size:11px;color:var(--c-text-dim);border:1px solid var(--c-border);" title="定时任务">任务</button>
                 <div class="font-size-controls" id="fontSizeControls" style="display:none">
                     <button class="btn-font" onclick="changeFontSize(-1)" title="缩小字体">A-</button>
                     <button class="btn-font" onclick="changeFontSize(1)" title="放大字体">A+</button>
@@ -1422,6 +1590,13 @@
                 <div class="dashboard-section">
                     <h3>活跃会话</h3>
                     <div class="dashboard-sessions" id="dashboardSessions"></div>
+                </div>
+                <div class="dashboard-section">
+                    <h3 style="display:flex;justify-content:space-between;align-items:center;">
+                        定时任务
+                        <button class="btn btn-new" style="font-size:11px;padding:2px 10px;" onclick="showCreateTaskModal()">+ 新建</button>
+                    </h3>
+                    <div id="dashboardTasks"></div>
                 </div>
                 <div class="dashboard-section">
                     <h3>系统状态</h3>
@@ -1470,6 +1645,79 @@
             <div class="modal-actions">
                 <button class="modal-btn-cancel" onclick="closeChangePassword()">取消</button>
                 <button class="modal-btn-confirm" onclick="doChangePassword()">确认修改</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建任务弹窗 -->
+    <div class="modal-overlay" id="createTaskModal">
+        <div class="modal-card" style="width:440px;">
+            <h3>创建定时任务</h3>
+            <div class="modal-field">
+                <input type="text" id="taskName" placeholder="任务名称">
+            </div>
+            <div class="modal-field">
+                <select id="taskProject">
+                    <option value="">选择项目...</option>
+                </select>
+            </div>
+            <div class="modal-field">
+                <textarea id="taskPrompt" placeholder="Claude 执行指令 (prompt)" rows="4"></textarea>
+            </div>
+            <div class="modal-field">
+                <input type="text" id="taskCron" placeholder="Cron 表达式（留空 = 仅手动触发）">
+                <div class="task-cron-hint">例: */30 * * * * (每30分钟) · 0 */5 * * * (每5小时) · 0 9 * * * (每天9点)</div>
+            </div>
+            <div class="modal-field">
+                <div class="task-radio-group">
+                    <label><input type="radio" name="taskMode" value="new" checked> 新会话</label>
+                    <label><input type="radio" name="taskMode" value="resume"> 恢复会话</label>
+                </div>
+            </div>
+            <div class="modal-error" id="createTaskError"></div>
+            <div class="modal-actions">
+                <button class="modal-btn-cancel" onclick="closeCreateTaskModal()">取消</button>
+                <button class="modal-btn-confirm" onclick="doCreateTask()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任务详情弹窗 -->
+    <div class="modal-overlay" id="taskDetailModal">
+        <div class="modal-card" style="width:560px;max-height:80vh;overflow-y:auto;">
+            <h3 id="taskDetailName"></h3>
+            <div class="task-detail-info">
+                <div>项目：<span id="taskDetailProject"></span></div>
+                <div>调度：<span id="taskDetailCron"></span></div>
+                <div>模式：<span id="taskDetailMode"></span></div>
+                <div style="margin-top:8px;">Prompt：</div>
+                <pre id="taskDetailPrompt" style="background:var(--c-bg);border:1px solid var(--c-border);border-radius:4px;padding:8px;font-size:11px;font-family:'SF Mono',Monaco,monospace;white-space:pre-wrap;max-height:120px;overflow:auto;margin-top:4px;"></pre>
+            </div>
+            <div class="task-detail-actions" id="taskDetailActions"></div>
+            <div class="dashboard-section" style="margin-bottom:12px;">
+                <h3>执行记录</h3>
+                <div class="task-runs-list" id="taskRunList"></div>
+            </div>
+            <div id="taskLogContainer" style="display:none;">
+                <h4 style="font-size:12px;color:var(--c-text-dim);margin-bottom:4px;">执行日志</h4>
+                <div class="task-log-viewer" id="taskLogViewer"></div>
+            </div>
+            <div class="modal-actions" style="margin-top:16px;">
+                <button class="modal-btn-cancel" onclick="closeTaskDetailModal()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任务管理面板（独立入口，终端运行时也能打开） -->
+    <div class="modal-overlay" id="taskPanelModal">
+        <div class="modal-card" style="width:600px;max-height:85vh;overflow-y:auto;">
+            <h3 style="display:flex;justify-content:space-between;align-items:center;">
+                定时任务
+                <button class="btn btn-new" style="font-size:11px;padding:2px 10px;" onclick="closeTaskPanel();showCreateTaskModal()">+ 新建</button>
+            </h3>
+            <div id="taskPanelList" style="margin-top:12px;"></div>
+            <div class="modal-actions" style="margin-top:16px;">
+                <button class="modal-btn-cancel" onclick="closeTaskPanel()">关闭</button>
             </div>
         </div>
     </div>
