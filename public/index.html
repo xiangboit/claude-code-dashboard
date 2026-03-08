@@ -122,9 +122,36 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 14px 16px;
+            padding: 8px 12px;
             border-bottom: 1px solid var(--c-border);
         }
+
+        .sidebar-tabs {
+            display: flex;
+            gap: 2px;
+        }
+        .sidebar-tab {
+            background: none;
+            border: none;
+            color: var(--c-text-dim);
+            cursor: pointer;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 16px;
+            line-height: 1;
+            transition: all 0.15s;
+        }
+        .sidebar-tab:hover { background: var(--c-surface-hover); color: var(--c-text); }
+        .sidebar-tab.active { background: var(--c-surface-active); color: var(--c-text); }
+
+        .sidebar-tab-content {
+            display: none;
+            flex-direction: column;
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .sidebar-tab-content.active { display: flex; }
 
         .sidebar h2 {
             font-size: 14px;
@@ -173,6 +200,14 @@
         .project-pin.pinned { color: var(--c-accent); }
         .project-pin:hover { background: var(--c-surface-hover); border-radius: 4px; }
         .pin-separator { height: 1px; background: var(--c-border); margin: 4px 8px; }
+        .root-group-header {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--c-text-ghost);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 8px 12px 4px;
+        }
 
         .worktree-toggle {
             font-size: 10px;
@@ -425,6 +460,40 @@
             gap: 8px;
             flex-shrink: 0;
             justify-content: flex-end;
+        }
+
+        .new-session-wrapper { position: relative; }
+        .agent-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            background: var(--c-surface);
+            border: 1px solid var(--c-border);
+            border-radius: 8px;
+            padding: 4px;
+            min-width: 140px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 200;
+        }
+        .agent-dropdown.open { display: block; }
+        .agent-dropdown-item {
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--c-text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .agent-dropdown-item:hover { background: var(--c-surface-hover); }
+        .agent-dropdown-item .agent-icon {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--c-accent);
+            flex-shrink: 0;
         }
 
         .session-actions {
@@ -1641,30 +1710,76 @@
     <div id="appMain" style="display:none;flex:1;">
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <h2>Projects</h2>
+            <div class="sidebar-tabs">
+                <button class="sidebar-tab active" data-tab="projects" onclick="switchSidebarTab('projects')" title="项目">&#128193;</button>
+                <button class="sidebar-tab" data-tab="tasks" onclick="switchSidebarTab('tasks')" title="定时任务">&#9202;</button>
+                <button class="sidebar-tab" data-tab="settings" onclick="switchSidebarTab('settings')" title="设置">&#9881;</button>
+            </div>
             <button class="theme-toggle" id="sidebarThemeToggle" onclick="toggleTheme()" title="切换主题"></button>
         </div>
-        <div class="project-search-wrapper">
-            <input class="project-search-input" id="projectSearchInput" placeholder="搜索 or 克隆" oninput="filterProjects(this.value)" onkeydown="if(event.key==='Enter')handleSearchClone(this)">
-            <div class="clone-status" id="sidebarCloneStatus"></div>
-        </div>
-        <div class="project-list" id="projectList"></div>
-        <div class="session-section">
-            <div class="session-section-header">
-                <span>Sessions</span>
-                <button class="session-clear-all" id="clearAllSessions" onclick="event.stopPropagation();killAllSessions()" title="关闭全部会话" style="display:none">&times; 全部</button>
+
+        <!-- Tab: 项目 -->
+        <div class="sidebar-tab-content active" id="sidebarTabProjects">
+            <div class="project-search-wrapper">
+                <input class="project-search-input" id="projectSearchInput" placeholder="搜索 or 克隆" oninput="filterProjects(this.value)" onkeydown="if(event.key==='Enter')handleSearchClone(this)">
+                <div class="clone-status" id="sidebarCloneStatus"></div>
             </div>
-            <div class="session-list" id="sessionList"></div>
+            <div class="project-list" id="projectList"></div>
+            <div class="session-section">
+                <div class="session-section-header">
+                    <span>Sessions</span>
+                    <button class="session-clear-all" id="clearAllSessions" onclick="event.stopPropagation();killAllSessions()" title="关闭全部会话" style="display:none">&times; 全部</button>
+                </div>
+                <div class="session-list" id="sessionList"></div>
+            </div>
         </div>
-        <div class="health-panel" id="healthPanel">
-            <div class="health-row"><span>运行时间</span><span id="healthUptime">--</span></div>
-            <div class="health-row"><span>活跃会话</span><span id="healthSessions">--</span></div>
-            <div class="health-row"><span>CPU 负载</span><span id="healthCpu">--</span></div>
-            <div class="health-row"><span>RSS 内存</span><span id="healthRss">--</span></div>
-            <div class="health-row"><span>Heap 内存</span><span id="healthHeap">--</span></div>
-            <div class="health-row"><span>磁盘</span><span id="healthDisk">--</span></div>
+
+        <!-- Tab: 定时任务 -->
+        <div class="sidebar-tab-content" id="sidebarTabTasks">
+            <div style="padding:8px 12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <span style="font-size:13px;font-weight:500;color:var(--c-text);">定时任务</span>
+                    <button class="btn btn-new" style="font-size:11px;padding:3px 10px;" onclick="showCreateTaskModal()">+ 新建</button>
+                </div>
+                <div id="sidebarTaskList" style="font-size:12px;"></div>
+            </div>
         </div>
-        <div class="status-bar" id="statusBar" onclick="toggleHealthPanel()" style="cursor:pointer">
+
+        <!-- Tab: 设置 -->
+        <div class="sidebar-tab-content" id="sidebarTabSettings">
+            <div style="padding:8px 12px;">
+                <div style="margin-bottom:16px;">
+                    <label style="font-size:13px;font-weight:500;color:var(--c-text);display:block;margin-bottom:8px;">项目目录</label>
+                    <div id="sidebarSettingsRootList"></div>
+                    <div style="display:flex;gap:6px;margin-top:8px;">
+                        <input type="text" id="sidebarSettingsNewRoot" class="project-search-input" placeholder="添加路径，如 ~/work" style="flex:1;" onkeydown="if(event.key==='Enter')addProjectRoot('sidebar')">
+                        <button class="btn btn-new" style="font-size:11px;padding:3px 10px;flex:none;" onclick="addProjectRoot('sidebar')">添加</button>
+                    </div>
+                    <div style="color:var(--c-red);font-size:11px;margin-top:4px;" id="sidebarSettingsRootError"></div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="font-size:13px;font-weight:500;color:var(--c-text);display:block;margin-bottom:8px;">终端字号</label>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <button class="btn-font" onclick="changeFontSize(-1)">A-</button>
+                        <span style="font-size:12px;color:var(--c-text-muted);" id="fontSizeLabel"></span>
+                        <button class="btn-font" onclick="changeFontSize(1)">A+</button>
+                    </div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="font-size:13px;font-weight:500;color:var(--c-text);display:block;margin-bottom:8px;">系统状态</label>
+                    <div class="health-rows">
+                        <div class="health-row"><span>运行时间</span><span id="healthUptime">--</span></div>
+                        <div class="health-row"><span>活跃会话</span><span id="healthSessions">--</span></div>
+                        <div class="health-row"><span>CPU 负载</span><span id="healthCpu">--</span></div>
+                        <div class="health-row"><span>RSS 内存</span><span id="healthRss">--</span></div>
+                        <div class="health-row"><span>Heap 内存</span><span id="healthHeap">--</span></div>
+                        <div class="health-row"><span>磁盘</span><span id="healthDisk">--</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="status-bar" id="statusBar" onclick="switchSidebarTab('settings')" style="cursor:pointer">
             <span id="statusSessions">0 sessions</span>
             <span id="statusMemory">--</span>
         </div>
@@ -1695,22 +1810,15 @@
                 </div>
             </div>
             <div class="header-right">
-                <div class="session-actions" id="sessionActions">
-                    <button class="btn btn-resume" onclick="reconnect(true)">恢复对话</button>
-                </div>
-                <div id="agentSelector" style="display:none;gap:2px;align-items:center"></div>
-                <button class="btn btn-new" id="newSessionBtn" onclick="reconnect(false)" style="display:none" title="新建会话 (Ctrl/⌘+N)">+ 新对话</button>
-                <button class="btn btn-kill" id="killBtn" onclick="killSession()">关闭会话</button>
-                <button class="btn" id="taskPanelBtn" onclick="toggleTaskPanel()" style="padding:4px 10px;font-size:11px;color:var(--c-text-dim);border:1px solid var(--c-border);" title="定时任务">任务</button>
-                <button class="btn-font" id="dashboardToggleBtn" onclick="toggleDashboardPanel()" title="项目面板" aria-label="切换面板">&#9636; 面板</button>
-                <div class="font-size-controls" id="fontSizeControls" style="display:none">
-                    <button class="btn-font" onclick="changeFontSize(-1)" title="缩小字体">A-</button>
-                    <button class="btn-font" onclick="changeFontSize(1)" title="放大字体">A+</button>
+                <div class="new-session-wrapper" id="newSessionWrapper">
+                    <button class="btn btn-new" id="newSessionBtn" onclick="handleNewSession(event)" title="新建会话 (Ctrl/⌘+N)">+ 新对话</button>
+                    <div class="agent-dropdown" id="agentDropdown">
+                        <div class="agent-dropdown-list" id="agentDropdownList"></div>
+                    </div>
                 </div>
                 <span class="user-info" onclick="event.stopPropagation();toggleUserMenu()" title="点击管理">
                     <span id="currentUserLabel"></span>
                     <div class="user-menu" id="userMenu">
-                        <div class="user-menu-item" onclick="event.stopPropagation();showSettings()">设置</div>
                         <div class="user-menu-item" onclick="event.stopPropagation();showChangePassword()">修改密码</div>
                         <div class="user-menu-item danger" onclick="event.stopPropagation();logout()">退出登录</div>
                     </div>

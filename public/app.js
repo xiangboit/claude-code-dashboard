@@ -273,11 +273,13 @@ function escapeHtml(str) {
 }
 
 function showSessionActions() {
-    document.getElementById('sessionActions').style.display = 'flex';
+    const el = document.getElementById('sessionActions');
+    if (el) el.style.display = 'flex';
 }
 
 function hideSessionActions() {
-    document.getElementById('sessionActions').style.display = 'none';
+    const el = document.getElementById('sessionActions');
+    if (el) el.style.display = 'none';
 }
 
 function formatTime(ts) {
@@ -438,6 +440,8 @@ function changeFontSize(delta) {
         tab.fitAddon.fit();
     }
     localStorage.setItem('termFontSize', termFontSize);
+    const label = document.getElementById('fontSizeLabel');
+    if (label) label.textContent = termFontSize + 'px';
     doFit();
 }
 
@@ -522,8 +526,8 @@ function createTabWebSocket(tabId, tabInfo) {
             currentSessionId = activeTabId;
             syncActiveTab();
             hideSessionActions();
-            document.getElementById('killBtn').style.display = '';
-            document.getElementById('fontSizeControls').style.display = '';
+            const killBtn = document.getElementById('killBtn'); if (killBtn) killBtn.style.display = '';
+            const fcEl = document.getElementById('fontSizeControls'); if (fcEl) fcEl.style.display = '';
             document.getElementById('newSessionBtn').style.display = '';
             resetIdleWarning();
             loadSessions();
@@ -538,8 +542,8 @@ function createTabWebSocket(tabId, tabInfo) {
             currentSessionId = activeTabId;
             syncActiveTab();
             hideSessionActions();
-            document.getElementById('killBtn').style.display = '';
-            document.getElementById('fontSizeControls').style.display = '';
+            const killBtn = document.getElementById('killBtn'); if (killBtn) killBtn.style.display = '';
+            const fcEl = document.getElementById('fontSizeControls'); if (fcEl) fcEl.style.display = '';
             document.getElementById('newSessionBtn').style.display = '';
             resetIdleWarning();
             loadSessions();
@@ -724,8 +728,8 @@ function closeTab(sessionId) {
             term = null;
             ws = null;
             currentSessionId = null;
-            document.getElementById('killBtn').style.display = 'none';
-            document.getElementById('fontSizeControls').style.display = 'none';
+            const kbEl = document.getElementById('killBtn'); if (kbEl) kbEl.style.display = 'none';
+            const fc2 = document.getElementById('fontSizeControls'); if (fc2) fc2.style.display = 'none';
             hideTerminalStatusBar();
             clearIdleWarning();
             renderTabBar();
@@ -1060,7 +1064,22 @@ function renderProjects(overrideList, hintText) {
     if (pinned.length > 0 && unpinned.length > 0) {
         html += '<div class="pin-separator"></div>';
     }
-    html += unpinned.map(renderProjectItem).join('');
+
+    // 多根目录时按 root 分组
+    if (hasMultiRoot && unpinned.length > 0) {
+        const groups = {};
+        for (const p of unpinned) {
+            const key = p.root || 'unknown';
+            if (!groups[key]) groups[key] = { label: p.rootLabel || key, items: [] };
+            groups[key].items.push(p);
+        }
+        for (const [, g] of Object.entries(groups)) {
+            html += `<div class="root-group-header">${escapeHtml(g.label)}</div>`;
+            html += g.items.map(renderProjectItem).join('');
+        }
+    } else {
+        html += unpinned.map(renderProjectItem).join('');
+    }
     list.innerHTML = html;
 
     // 异步加载 worktree 信息（首次渲染后静默检测）
@@ -1223,8 +1242,10 @@ function handleDropdownClone(inputEl) {
 function closeAllPopups() {
     const pd = document.getElementById('projectDropdown');
     const um = document.getElementById('userMenu');
+    const ad = document.getElementById('agentDropdown');
     if (pd) pd.classList.remove('open');
     if (um) um.classList.remove('open');
+    if (ad) ad.classList.remove('open');
     closeSettings();
 }
 
@@ -1357,16 +1378,9 @@ function formatUptime(seconds) {
 
 function toggleHealthPanel(e) {
     if (e) e.stopPropagation();
-    document.getElementById('healthPanel').classList.toggle('open');
+    // 健康面板已移到设置 tab
+    switchSidebarTab('settings');
 }
-
-document.addEventListener('click', (e) => {
-    const panel = document.getElementById('healthPanel');
-    const bar = document.getElementById('statusBar');
-    if (panel && !panel.contains(e.target) && !bar.contains(e.target)) {
-        panel.classList.remove('open');
-    }
-});
 
 async function refreshHealth() {
     try {
@@ -1379,14 +1393,79 @@ async function refreshHealth() {
 // ---- 设置弹窗 ----
 
 function showSettings() {
-    document.getElementById('userMenu').classList.remove('open');
-    document.getElementById('settingsModal').classList.add('open');
-    loadSettingsRoots();
+    switchSidebarTab('settings');
 }
 
 function closeSettings() {
-    document.getElementById('settingsModal').classList.remove('open');
+    const m = document.getElementById('settingsModal');
+    if (m) m.classList.remove('open');
 }
+
+// ---- 侧边栏 Tab 切换 ----
+
+function switchSidebarTab(tabName) {
+    document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+    document.querySelectorAll('.sidebar-tab-content').forEach(c => c.classList.remove('active'));
+    const panel = document.getElementById('sidebarTab' + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+    if (panel) panel.classList.add('active');
+    if (tabName === 'tasks') renderSidebarTasks();
+    if (tabName === 'settings') loadSettingsRoots();
+}
+
+// ---- 新建对话（含 Agent 选择） ----
+
+function handleNewSession(event) {
+    if (!currentProject) { showToast('请先选择一个项目'); return; }
+    if (availableAgents.length > 1) {
+        // 多 agent：显示下拉选择
+        if (event) event.stopPropagation();
+        const dropdown = document.getElementById('agentDropdown');
+        if (dropdown.classList.contains('open')) {
+            dropdown.classList.remove('open');
+            return;
+        }
+        const list = document.getElementById('agentDropdownList');
+        list.innerHTML = availableAgents.map(a =>
+            `<div class="agent-dropdown-item" onclick="selectAgentAndStart('${escapeHtml(a)}')">
+                <span class="agent-icon"></span>${escapeHtml(a)}
+            </div>`
+        ).join('');
+        dropdown.classList.add('open');
+        return;
+    }
+    reconnect(false);
+}
+
+function selectAgentAndStart(agent) {
+    selectedAgent = agent;
+    document.getElementById('agentDropdown').classList.remove('open');
+    reconnect(false);
+}
+
+// ---- 侧边栏任务列表 ----
+
+function renderSidebarTasks() {
+    const el = document.getElementById('sidebarTaskList');
+    if (!el) return;
+    if (tasksCache.length === 0) {
+        el.innerHTML = '<div style="color:var(--c-text-dim);padding:8px 0;">无定时任务</div>';
+        return;
+    }
+    el.innerHTML = tasksCache.map(t => {
+        const run = t.latestRun;
+        const statusColor = run ? (run.status === 'success' ? 'var(--c-green)' : run.status === 'running' ? 'var(--c-accent)' : 'var(--c-red)') : 'var(--c-text-dim)';
+        const statusText = run ? run.status : 'idle';
+        return `<div style="padding:6px 0;border-bottom:1px solid var(--c-border);cursor:pointer;" onclick="showTaskDetail('${escapeHtml(t.id)}')">
+            <div style="display:flex;align-items:center;gap:6px;">
+                <span style="width:6px;height:6px;border-radius:50%;background:${statusColor};flex-shrink:0;"></span>
+                <span style="color:var(--c-text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(t.name)}</span>
+            </div>
+            <div style="color:var(--c-text-dim);font-size:10px;margin-top:2px;">${escapeHtml(t.project_id)} · ${statusText} · ${t.cron_expr || 'manual'}</div>
+        </div>`;
+    }).join('');
+}
+
+// ---- 设置：项目根目录 ----
 
 async function loadSettingsRoots() {
     try {
@@ -1397,26 +1476,28 @@ async function loadSettingsRoots() {
 }
 
 function renderSettingsRoots() {
-    const list = document.getElementById('settingsRootList');
-    if (settingsRoots.length === 0) {
-        list.innerHTML = '<div style="color:var(--c-text-dim);font-size:12px;padding:8px;">未配置项目目录</div>';
-        return;
-    }
+    // 渲染到侧边栏设置 tab
+    const targets = [document.getElementById('sidebarSettingsRootList'), document.getElementById('settingsRootList')];
     const isLast = settingsRoots.length === 1;
-    list.innerHTML = settingsRoots.map(r => `
-        <div class="settings-root-item">
-            <div class="root-path">${escapeHtml(r.dir_path)}</div>
-            ${isLast ? '' : `<button class="settings-root-delete" onclick="removeProjectRoot(${r.id})" title="移除">&times;</button>`}
-        </div>
-    `).join('');
+    const html = settingsRoots.length === 0
+        ? '<div style="color:var(--c-text-dim);font-size:12px;padding:4px 0;">未配置项目目录</div>'
+        : settingsRoots.map(r => `
+            <div class="settings-root-item">
+                <div class="root-path">${escapeHtml(r.dir_path)}</div>
+                ${isLast ? '' : `<button class="settings-root-delete" onclick="removeProjectRoot(${r.id})" title="移除">&times;</button>`}
+            </div>
+        `).join('');
+    targets.forEach(el => { if (el) el.innerHTML = html; });
 }
 
-async function addProjectRoot() {
-    const input = document.getElementById('settingsNewRoot');
-    const errorEl = document.getElementById('settingsRootError');
+async function addProjectRoot(source) {
+    const inputId = source === 'sidebar' ? 'sidebarSettingsNewRoot' : 'settingsNewRoot';
+    const errorId = source === 'sidebar' ? 'sidebarSettingsRootError' : 'settingsRootError';
+    const input = document.getElementById(inputId);
+    const errorEl = document.getElementById(errorId);
     const dirPath = input.value.trim();
     if (!dirPath) return;
-    errorEl.textContent = '';
+    if (errorEl) errorEl.textContent = '';
     try {
         const res = await authFetch('/api/settings/roots', {
             method: 'POST',
@@ -1424,11 +1505,11 @@ async function addProjectRoot() {
             body: JSON.stringify({ dir_path: dirPath })
         });
         const data = await res.json();
-        if (!res.ok) { errorEl.textContent = data.error; return; }
+        if (!res.ok) { if (errorEl) errorEl.textContent = data.error; return; }
         input.value = '';
         await loadSettingsRoots();
         loadProjects();
-    } catch (e) { errorEl.textContent = e.message; }
+    } catch (e) { if (errorEl) errorEl.textContent = e.message; }
 }
 
 async function removeProjectRoot(id) {
@@ -1498,6 +1579,8 @@ function initApp() {
     loadAgents();
     connectWebSocket();
     refreshHealth();
+    const fsl = document.getElementById('fontSizeLabel');
+    if (fsl) fsl.textContent = termFontSize + 'px';
     setInterval(refreshHealth, 10000);
     setInterval(loadTasks, 15000);
     // 粒子系统
@@ -1534,7 +1617,6 @@ document.addEventListener('keydown', (e) => {
         closeCreateTaskModal();
         closeTaskDetailModal();
         closeTaskPanel();
-        document.getElementById('healthPanel').classList.remove('open');
     }
 });
 
