@@ -156,6 +156,51 @@
             background: var(--c-surface-active);
         }
 
+        .project-pin {
+            opacity: 0;
+            background: none;
+            border: none;
+            color: var(--c-text-dim);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 4px;
+            flex-shrink: 0;
+            transition: opacity 0.15s;
+            margin-left: auto;
+        }
+        .project-item:hover .project-pin,
+        .project-pin.pinned { opacity: 1; }
+        .project-pin.pinned { color: var(--c-accent); }
+        .project-pin:hover { background: var(--c-surface-hover); border-radius: 4px; }
+        .pin-separator { height: 1px; background: var(--c-border); margin: 4px 8px; }
+
+        .worktree-toggle {
+            font-size: 10px;
+            color: var(--c-text-dim);
+            cursor: pointer;
+            padding: 0 4px;
+            transition: transform 0.15s;
+            display: inline-block;
+        }
+        .worktree-toggle.expanded { transform: rotate(90deg); }
+        .worktree-list { padding-left: 20px; display: none; }
+        .worktree-list.open { display: block; }
+        .worktree-item {
+            padding: 3px 8px;
+            font-size: 11px;
+            color: var(--c-text-muted);
+            cursor: pointer;
+            border-radius: 4px;
+            margin-bottom: 1px;
+        }
+        .worktree-item:hover { background: var(--c-surface-hover); color: var(--c-text); }
+        .root-tag {
+            font-size: 10px;
+            color: var(--c-text-ghost);
+            margin-left: auto;
+            flex-shrink: 0;
+        }
+
         .project-name {
             font-size: 13px;
             font-weight: 500;
@@ -920,6 +965,39 @@
             width: 440px;
         }
 
+        .settings-root-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: var(--c-input-bg);
+            border: 1px solid var(--c-border-light, var(--c-border));
+            border-radius: 6px;
+            margin-bottom: 6px;
+        }
+        .settings-root-item .root-path {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+            color: var(--c-text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .settings-root-delete {
+            background: none;
+            border: none;
+            color: var(--c-text-dim);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .settings-root-delete:hover {
+            color: var(--c-red);
+            background: var(--c-surface-hover);
+        }
+
         .task-radio-group {
             display: flex;
             gap: 16px;
@@ -1632,6 +1710,7 @@
                 <span class="user-info" onclick="event.stopPropagation();toggleUserMenu()" title="点击管理">
                     <span id="currentUserLabel"></span>
                     <div class="user-menu" id="userMenu">
+                        <div class="user-menu-item" onclick="event.stopPropagation();showSettings()">设置</div>
                         <div class="user-menu-item" onclick="event.stopPropagation();showChangePassword()">修改密码</div>
                         <div class="user-menu-item danger" onclick="event.stopPropagation();logout()">退出登录</div>
                     </div>
@@ -1702,6 +1781,26 @@
     </div>
 
     </div><!-- /appMain -->
+
+    <!-- 设置弹窗 -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal-card" style="width:480px;max-height:80vh;overflow-y:auto;">
+            <h3>设置</h3>
+            <div style="margin-bottom:20px;">
+                <label style="font-size:13px;font-weight:500;color:var(--c-text);display:block;margin-bottom:10px;">项目目录</label>
+                <div id="settingsRootList"></div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <input type="text" id="settingsNewRoot" class="modal-field-input" placeholder="添加路径，如 ~/work"
+                           style="flex:1;" onkeydown="if(event.key==='Enter')addProjectRoot()">
+                    <button class="modal-btn-confirm" style="flex:none;padding:8px 16px;" onclick="addProjectRoot()">添加</button>
+                </div>
+                <div class="modal-error" id="settingsRootError"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn-cancel" onclick="closeSettings()">关闭</button>
+            </div>
+        </div>
+    </div>
 
     <!-- 修改密码弹窗 -->
     <div class="modal-overlay" id="changePwdModal">

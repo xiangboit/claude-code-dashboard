@@ -171,6 +171,7 @@ app.use('/api/clone', requireAuth);
 app.use('/api/sessions', requireAuth);
 app.use('/api/health', requireAuth);
 app.use('/api/clipboard', requireAuth);
+app.use('/api/settings', requireAuth);
 
 // 剪贴板同步：接收远程浏览器的图片，写入 macOS 系统剪贴板
 app.post('/api/clipboard', (req, res) => {
@@ -241,6 +242,36 @@ db.exec(`
   )
 `);
 
+// 置顶字段迁移
+try { db.exec('ALTER TABLE project_stats ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0'); } catch {}
+try { db.exec('ALTER TABLE project_stats ADD COLUMN pin_order INTEGER NOT NULL DEFAULT 0'); } catch {}
+
+// ---- 项目根目录 ----
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS project_roots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dir_path TEXT NOT NULL UNIQUE,
+    label TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )
+`);
+
+// 启动时 seed 默认目录
+{
+  const rootCount = db.prepare('SELECT COUNT(*) AS cnt FROM project_roots').get().cnt;
+  if (rootCount === 0) {
+    const defaultDir = path.join(os.homedir(), 'projects');
+    db.prepare('INSERT INTO project_roots (dir_path, label, sort_order, created_at) VALUES (?, ?, 0, ?)')
+      .run(defaultDir, null, Date.now());
+  }
+}
+
+function getProjectRoots() {
+  return db.prepare('SELECT * FROM project_roots ORDER BY sort_order ASC').all();
+}
+
 // ---- 定时任务表 ----
 
 db.exec(`
@@ -286,8 +317,6 @@ const runningTaskCounts = new Map(); // taskId → number
 const logsBaseDir = path.join(os.homedir(), '.claude-dashboard', 'logs');
 if (!fs.existsSync(logsBaseDir)) fs.mkdirSync(logsBaseDir, { recursive: true });
 
-const projectsDir = path.join(os.homedir(), 'projects');
-
 let projectsCache = null;
 let projectsCacheTime = 0;
 const CACHE_TTL = 5000;
@@ -297,42 +326,60 @@ function invalidateProjectsCache() {
   projectsCacheTime = 0;
 }
 
-// 监听项目目录变更
-try {
-  fs.watch(projectsDir, { persistent: false }, invalidateProjectsCache);
-} catch {}
+// 监听多个项目根目录变更
+let fsWatchers = [];
+function setupFsWatchers() {
+  fsWatchers.forEach(w => { try { w.close(); } catch {} });
+  fsWatchers = [];
+  for (const root of getProjectRoots()) {
+    try { fsWatchers.push(fs.watch(root.dir_path, { persistent: false }, invalidateProjectsCache)); } catch {}
+  }
+}
+setupFsWatchers();
 
 function scanProjects() {
   const now = Date.now();
   if (projectsCache && now - projectsCacheTime < CACHE_TTL) return projectsCache;
 
-  try {
-    const entries = fs.readdirSync(projectsDir, { withFileTypes: true });
-    const statsRows = db.prepare('SELECT project_id, use_count, last_used_at FROM project_stats').all();
-    const statsMap = {};
-    for (const row of statsRows) statsMap[row.project_id] = row;
+  const roots = getProjectRoots();
+  const statsRows = db.prepare('SELECT project_id, use_count, last_used_at, pinned, pin_order FROM project_stats').all();
+  const statsMap = {};
+  for (const row of statsRows) statsMap[row.project_id] = row;
 
-    const projects = entries
-      .filter(d => d.isDirectory() && !d.name.startsWith('.'))
-      .map(d => ({
-        id: d.name,
-        name: d.name,
-        path: path.join(projectsDir, d.name),
-        use_count: (statsMap[d.name] && statsMap[d.name].use_count) || 0,
-        last_used_at: (statsMap[d.name] && statsMap[d.name].last_used_at) || 0
-      }));
+  const projects = [];
+  const hasMultiRoot = roots.length > 1;
 
-    projects.sort((a, b) => {
-      if (b.use_count !== a.use_count) return b.use_count - a.use_count;
-      return a.name.localeCompare(b.name);
-    });
-
-    projectsCache = projects;
-    projectsCacheTime = now;
-    return projects;
-  } catch {
-    return [];
+  for (const root of roots) {
+    try {
+      const entries = fs.readdirSync(root.dir_path, { withFileTypes: true });
+      for (const d of entries) {
+        if (!d.isDirectory() || d.name.startsWith('.')) continue;
+        const stats = statsMap[d.name] || {};
+        projects.push({
+          id: d.name,
+          name: d.name,
+          path: path.join(root.dir_path, d.name),
+          root: root.dir_path,
+          rootLabel: root.label || path.basename(root.dir_path),
+          use_count: stats.use_count || 0,
+          last_used_at: stats.last_used_at || 0,
+          pinned: stats.pinned || 0,
+          pin_order: stats.pin_order || 0,
+        });
+      }
+    } catch {}
   }
+
+  projects.sort((a, b) => {
+    if (a.pinned !== b.pinned) return b.pinned - a.pinned;
+    if (a.pinned && b.pinned) return a.pin_order - b.pin_order;
+    if (b.use_count !== a.use_count) return b.use_count - a.use_count;
+    return a.name.localeCompare(b.name);
+  });
+
+  projectsCache = projects;
+  projectsCacheTime = now;
+  return projects;
 }
 
 function updateProjectUsage(projectId) {
@@ -437,18 +484,125 @@ app.get('/api/projects', (req, res) => {
 const gitUrlPattern = /^(https?:\/\/|git@|ssh:\/\/).+/;
 
 app.post('/api/clone', (req, res) => {
-  const { url } = req.body;
+  const { url, rootId } = req.body;
   if (!url) return res.status(400).json({ error: '缺少 git 地址' });
   if (!gitUrlPattern.test(url)) {
     return res.status(400).json({ error: '无效的 git 地址' });
   }
 
-  execFile('git', ['clone', url], { cwd: projectsDir, timeout: 120000 }, (err, stdout, stderr) => {
+  const roots = getProjectRoots();
+  let targetDir;
+  if (rootId) {
+    const root = roots.find(r => r.id === rootId);
+    if (!root) return res.status(400).json({ error: '项目目录不存在' });
+    targetDir = root.dir_path;
+  } else {
+    targetDir = roots[0]?.dir_path;
+    if (!targetDir) return res.status(400).json({ error: '未配置项目目录' });
+  }
+
+  execFile('git', ['clone', url], { cwd: targetDir, timeout: 120000 }, (err, stdout, stderr) => {
     if (err) {
       return res.status(500).json({ error: stderr || err.message });
     }
+    invalidateProjectsCache();
     res.json({ success: true, output: stderr || stdout });
   });
+});
+
+// ---- 项目根目录管理 API ----
+
+app.get('/api/settings/roots', (req, res) => {
+  res.json(getProjectRoots());
+});
+
+app.post('/api/settings/roots', (req, res) => {
+  let { dir_path, label } = req.body;
+  if (!dir_path) return res.status(400).json({ error: '缺少路径' });
+  // 展开 ~ 为 home 目录
+  if (dir_path.startsWith('~')) dir_path = path.join(os.homedir(), dir_path.slice(1));
+  dir_path = path.resolve(dir_path).replace(/\/+$/, '');
+  try {
+    if (!fs.existsSync(dir_path) || !fs.statSync(dir_path).isDirectory()) {
+      return res.status(400).json({ error: '路径不存在或不是目录' });
+    }
+  } catch { return res.status(400).json({ error: '路径无法访问' }); }
+  // 检查重复
+  const existing = getProjectRoots();
+  if (existing.some(r => r.dir_path === dir_path)) {
+    return res.status(400).json({ error: '该目录已添加' });
+  }
+  const maxOrder = existing.reduce((m, r) => Math.max(m, r.sort_order), -1);
+  db.prepare('INSERT INTO project_roots (dir_path, label, sort_order, created_at) VALUES (?, ?, ?, ?)')
+    .run(dir_path, label || null, maxOrder + 1, Date.now());
+  invalidateProjectsCache();
+  setupFsWatchers();
+  const row = db.prepare('SELECT * FROM project_roots WHERE dir_path = ?').get(dir_path);
+  res.json(row);
+});
+
+app.delete('/api/settings/roots/:id', (req, res) => {
+  const roots = getProjectRoots();
+  if (roots.length <= 1) return res.status(400).json({ error: '至少保留一个项目目录' });
+  db.prepare('DELETE FROM project_roots WHERE id = ?').run(req.params.id);
+  invalidateProjectsCache();
+  setupFsWatchers();
+  res.json({ success: true });
+});
+
+// ---- 项目置顶 API ----
+
+app.post('/api/projects/:id/pin', (req, res) => {
+  const projectId = req.params.id;
+  const { pinned } = req.body;
+  const now = Date.now();
+  if (pinned) {
+    const maxPin = db.prepare('SELECT MAX(pin_order) AS m FROM project_stats WHERE pinned = 1').get().m || 0;
+    db.prepare(`
+      INSERT INTO project_stats (project_id, use_count, last_used_at, pinned, pin_order)
+      VALUES (?, 0, 0, 1, ?)
+      ON CONFLICT(project_id) DO UPDATE SET pinned = 1, pin_order = ?
+    `).run(projectId, maxPin + 1, maxPin + 1);
+  } else {
+    db.prepare(`
+      INSERT INTO project_stats (project_id, use_count, last_used_at, pinned, pin_order)
+      VALUES (?, 0, 0, 0, 0)
+      ON CONFLICT(project_id) DO UPDATE SET pinned = 0, pin_order = 0
+    `).run(projectId);
+  }
+  invalidateProjectsCache();
+  res.json({ success: true, pinned: !!pinned });
+});
+
+// ---- Worktree 检测 API ----
+
+app.get('/api/projects/:id/worktrees', (req, res) => {
+  const project = scanProjects().find(p => p.id === req.params.id);
+  if (!project) return res.status(404).json({ error: '项目不存在' });
+  try {
+    const output = execFileSync('git', ['worktree', 'list', '--porcelain'],
+      { cwd: project.path, encoding: 'utf8', timeout: 5000 });
+    const worktrees = [];
+    let current = {};
+    for (const line of output.split('\n')) {
+      if (line.startsWith('worktree ')) {
+        if (current.path) worktrees.push(current);
+        current = { path: line.slice(9) };
+      } else if (line.startsWith('branch ')) {
+        current.branch = line.slice(7).replace('refs/heads/', '');
+      } else if (line.startsWith('HEAD ')) {
+        current.head = line.slice(5, 12);
+      }
+    }
+    if (current.path) worktrees.push(current);
+    // 主 worktree 标记为 main，其余为 extra
+    const extras = worktrees
+      .filter(w => w.path !== project.path)
+      .map(w => ({ path: w.path, branch: w.branch, head: w.head, name: path.basename(w.path) }));
+    res.json(extras);
+  } catch {
+    res.json([]);
+  }
 });
 
 // ---- 进程池 ----
@@ -489,8 +643,15 @@ function createSession(projectId, cols, rows, resume, owner, extraArgs, agent) {
   for (const s of sessions.values()) { if (s.owner === owner) userCount++; }
   if (userCount >= MAX_SESSIONS_PER_USER) return { error: '个人会话数已达上限' };
 
-  const project = scanProjects().find(p => p.id === projectId);
-  if (!project) return null;
+  // 支持绝对路径（worktree 场景）
+  let cwd;
+  if (path.isAbsolute(projectId) && fs.existsSync(projectId)) {
+    cwd = projectId;
+  } else {
+    const project = scanProjects().find(p => p.id === projectId);
+    if (!project) return null;
+    cwd = project.path;
+  }
 
   const binPath = agentPaths[agent];
   if (!binPath) return { error: `${agent} 未安装或未找到` };
@@ -512,7 +673,7 @@ function createSession(projectId, cols, rows, resume, owner, extraArgs, agent) {
     name: 'xterm-256color',
     cols: cols || 80,
     rows: rows || 24,
-    cwd: project.path,
+    cwd,
     env
   });
 
@@ -683,7 +844,8 @@ app.get('/api/health', (req, res) => {
   // 磁盘用量（项目目录所在分区）
   let disk = null;
   try {
-    const df = execFileSync('df', ['-k', projectsDir], { encoding: 'utf8' });
+    const primaryDir = getProjectRoots()[0]?.dir_path || path.join(os.homedir(), 'projects');
+    const df = execFileSync('df', ['-k', primaryDir], { encoding: 'utf8' });
     const lines = df.trim().split('\n');
     if (lines.length >= 2) {
       const parts = lines[1].split(/\s+/);
@@ -907,7 +1069,7 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'start') {
-      const result = createSession(msg.projectId, msg.cols, msg.rows, msg.resume, username, null, msg.agent);
+      const result = createSession(msg.cwd || msg.projectId, msg.cols, msg.rows, msg.resume, username, null, msg.agent);
       if (!result) {
         ws.send(JSON.stringify({ type: 'error', data: '项目不存在' }));
         return;

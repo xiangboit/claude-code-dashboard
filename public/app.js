@@ -32,6 +32,10 @@ const MAX_TABS = 8;
 let availableAgents = ['claude'];
 let selectedAgent = 'claude';
 
+// ---- 设置 & Worktree ----
+let settingsRoots = [];
+const worktreeCache = {}; // projectId → { data: [...], expanded: false }
+
 // ---- 主题切换 ----
 
 function getThemeColor(varName) {
@@ -488,7 +492,9 @@ function createTabWebSocket(tabId, tabInfo) {
             tabWs.send(JSON.stringify({ type: 'attach', sessionId: tabInfo.pendingAttach, cols: tabInfo.term.cols, rows: tabInfo.term.rows }));
         } else if (tabInfo.pendingStart) {
             const s = tabInfo.pendingStart;
-            tabWs.send(JSON.stringify({ type: 'start', projectId: s.projectId, resume: s.resume, agent: s.agent || tabInfo.agent, cols: tabInfo.term.cols, rows: tabInfo.term.rows }));
+            const startMsg = { type: 'start', projectId: s.projectId, resume: s.resume, agent: s.agent || tabInfo.agent, cols: tabInfo.term.cols, rows: tabInfo.term.rows };
+            if (s.cwd) startMsg.cwd = s.cwd;
+            tabWs.send(JSON.stringify(startMsg));
         }
     };
 
@@ -618,7 +624,7 @@ function wsSend(msg) {
 
 // ---- Tab Management ----
 
-function openTab(projectId, sessionId, resume, agent) {
+function openTab(projectId, sessionId, resume, agent, cwd) {
     if (sessionId && openTabs.has(sessionId)) {
         switchTab(sessionId);
         return;
@@ -630,7 +636,8 @@ function openTab(projectId, sessionId, resume, agent) {
 
     const tabAgent = agent || selectedAgent || 'claude';
     const project = projectsCache.find(p => p.id === projectId);
-    const projectName = project ? project.name : projectId;
+    // worktree 场景：显示 worktree 目录名
+    const projectName = cwd ? cwd.split('/').pop() : (project ? project.name : projectId);
     const tabId = sessionId || ('new-' + Date.now());
 
     const container = document.createElement('div');
@@ -652,7 +659,7 @@ function openTab(projectId, sessionId, resume, agent) {
         createdAt: Date.now(),
         reconnectTimer: null,
         pendingAttach: sessionId || null,
-        pendingStart: sessionId ? null : { projectId, resume: !!resume, agent: tabAgent },
+        pendingStart: sessionId ? null : { projectId, resume: !!resume, agent: tabAgent, cwd },
     };
 
     openTabs.set(tabId, tabInfo);
@@ -993,7 +1000,7 @@ function renderProjects(overrideList, hintText) {
     }
 
     if (filtered.length === 0 && !hintText && projectsCache.length === 0) {
-        list.innerHTML = '<div style="color:var(--c-text-dim);text-align:center;padding:20px;font-size:12px;line-height:1.6;">将项目放在 ~/projects/ 下<br>即可自动发现<br><span style="color:var(--c-text-faint);font-size:11px;">或粘贴 git 地址回车 clone</span></div>';
+        list.innerHTML = '<div style="color:var(--c-text-dim);text-align:center;padding:20px;font-size:12px;line-height:1.6;">将项目放在配置的目录下<br>即可自动发现<br><span style="color:var(--c-text-faint);font-size:11px;">或粘贴 git 地址回车 clone</span></div>';
         return;
     }
 
@@ -1008,24 +1015,63 @@ function renderProjects(overrideList, hintText) {
         html += '<div style="color:var(--c-accent);text-align:center;padding:6px;font-size:11px;">' + escapeHtml(hintText) + '</div>';
     }
 
-    html += filtered.map(p => {
+    const hasMultiRoot = new Set(projectsCache.map(p => p.root)).size > 1;
+    const pinned = filtered.filter(p => p.pinned);
+    const unpinned = filtered.filter(p => !p.pinned);
+
+    function renderProjectItem(p) {
         const sessions = getProjectSessions(p.id);
         const liveSessions = sessions.filter(s => !s.stale);
         const isActive = currentProject && currentProject.id === p.id;
         const liveCount = liveSessions.length;
         const name = escapeHtml(p.name);
-        const desc = escapeHtml(p.path);
+        const pid = escapeHtml(p.id);
+        const pinClass = p.pinned ? 'pinned' : '';
+        const pinIcon = p.pinned ? '&#9733;' : '&#9734;';
+        const rootTag = hasMultiRoot && p.rootLabel ? `<span class="root-tag">${escapeHtml(p.rootLabel)}</span>` : '';
+        const wt = worktreeCache[p.id];
+        const hasWorktrees = wt?.data?.length > 0;
+        const wtExpanded = wt?.expanded;
+        const wtToggle = hasWorktrees
+            ? `<span class="worktree-toggle ${wtExpanded ? 'expanded' : ''}" onclick="toggleWorktreeList('${pid}', event)">&#9654;</span>`
+            : '';
+
+        let wtList = '';
+        if (hasWorktrees && wtExpanded) {
+            wtList = '<div class="worktree-list open">' + wt.data.map(w =>
+                `<div class="worktree-item" onclick="openWorktree('${pid}', '${escapeHtml(w.path)}', '${escapeHtml(w.branch || '')}', event)" title="${escapeHtml(w.path)}">${escapeHtml(w.branch || w.name)}</div>`
+            ).join('') + '</div>';
+        }
+
         return `
         <div class="project-item ${isActive ? 'active' : ''}"
-             onclick="selectProject('${escapeHtml(p.id)}')">
+             onclick="selectProject('${pid}')">
             <div class="project-name">
+                ${wtToggle}
                 ${liveCount > 0 ? '<span class="session-dot"></span>' : ''}${name}
                 ${liveCount > 1 ? `<span class="session-count">${liveCount}</span>` : ''}
+                ${rootTag}
+                <button class="project-pin ${pinClass}" onclick="togglePin('${pid}', event)" title="${p.pinned ? '取消置顶' : '置顶'}">${pinIcon}</button>
             </div>
-            <div class="project-desc">${desc}</div>
-        </div>`;
-    }).join('');
+        </div>${wtList}`;
+    }
+
+    html += pinned.map(renderProjectItem).join('');
+    if (pinned.length > 0 && unpinned.length > 0) {
+        html += '<div class="pin-separator"></div>';
+    }
+    html += unpinned.map(renderProjectItem).join('');
     list.innerHTML = html;
+
+    // 异步加载 worktree 信息（首次渲染后静默检测）
+    filtered.forEach(p => {
+        if (!worktreeCache[p.id]) {
+            worktreeCache[p.id] = { data: null, expanded: false };
+            loadWorktrees(p.id).then(data => {
+                if (data && data.length > 0) renderProjects(overrideList, hintText);
+            });
+        }
+    });
 }
 
 // ---- 项目选择 ----
@@ -1179,6 +1225,7 @@ function closeAllPopups() {
     const um = document.getElementById('userMenu');
     if (pd) pd.classList.remove('open');
     if (um) um.classList.remove('open');
+    closeSettings();
 }
 
 // ---- 仪表板面板 ----
@@ -1327,6 +1374,115 @@ async function refreshHealth() {
         const data = await res.json();
         updateHealthUI(data);
     } catch {}
+}
+
+// ---- 设置弹窗 ----
+
+function showSettings() {
+    document.getElementById('userMenu').classList.remove('open');
+    document.getElementById('settingsModal').classList.add('open');
+    loadSettingsRoots();
+}
+
+function closeSettings() {
+    document.getElementById('settingsModal').classList.remove('open');
+}
+
+async function loadSettingsRoots() {
+    try {
+        const res = await authFetch('/api/settings/roots');
+        settingsRoots = await res.json();
+        renderSettingsRoots();
+    } catch {}
+}
+
+function renderSettingsRoots() {
+    const list = document.getElementById('settingsRootList');
+    if (settingsRoots.length === 0) {
+        list.innerHTML = '<div style="color:var(--c-text-dim);font-size:12px;padding:8px;">未配置项目目录</div>';
+        return;
+    }
+    const isLast = settingsRoots.length === 1;
+    list.innerHTML = settingsRoots.map(r => `
+        <div class="settings-root-item">
+            <div class="root-path">${escapeHtml(r.dir_path)}</div>
+            ${isLast ? '' : `<button class="settings-root-delete" onclick="removeProjectRoot(${r.id})" title="移除">&times;</button>`}
+        </div>
+    `).join('');
+}
+
+async function addProjectRoot() {
+    const input = document.getElementById('settingsNewRoot');
+    const errorEl = document.getElementById('settingsRootError');
+    const dirPath = input.value.trim();
+    if (!dirPath) return;
+    errorEl.textContent = '';
+    try {
+        const res = await authFetch('/api/settings/roots', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dir_path: dirPath })
+        });
+        const data = await res.json();
+        if (!res.ok) { errorEl.textContent = data.error; return; }
+        input.value = '';
+        await loadSettingsRoots();
+        loadProjects();
+    } catch (e) { errorEl.textContent = e.message; }
+}
+
+async function removeProjectRoot(id) {
+    if (!confirm('确定移除此项目目录？（不会删除文件）')) return;
+    try {
+        const res = await authFetch('/api/settings/roots/' + id, { method: 'DELETE' });
+        if (res.ok) { await loadSettingsRoots(); loadProjects(); }
+    } catch {}
+}
+
+// ---- 项目置顶 ----
+
+async function togglePin(projectId, event) {
+    event.stopPropagation();
+    const p = projectsCache.find(p => p.id === projectId);
+    if (!p) return;
+    try {
+        await authFetch('/api/projects/' + encodeURIComponent(projectId) + '/pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pinned: !p.pinned })
+        });
+        await loadProjects();
+    } catch {}
+}
+
+// ---- Worktree 切换 ----
+
+async function loadWorktrees(projectId) {
+    if (worktreeCache[projectId]?.data) return worktreeCache[projectId].data;
+    try {
+        const res = await authFetch('/api/projects/' + encodeURIComponent(projectId) + '/worktrees');
+        const data = await res.json();
+        if (!worktreeCache[projectId]) worktreeCache[projectId] = { data: null, expanded: false };
+        worktreeCache[projectId].data = data;
+        return data;
+    } catch { return []; }
+}
+
+async function toggleWorktreeList(projectId, event) {
+    event.stopPropagation();
+    const cache = worktreeCache[projectId] || { data: null, expanded: false };
+    worktreeCache[projectId] = cache;
+    cache.expanded = !cache.expanded;
+    if (cache.expanded && !cache.data) {
+        await loadWorktrees(projectId);
+    }
+    renderProjects();
+}
+
+function openWorktree(projectId, worktreePath, branch, event) {
+    if (event) event.stopPropagation();
+    // 用 worktree 绝对路径作为 cwd 打开新 tab
+    openTab(projectId, null, false, selectedAgent, worktreePath);
 }
 
 // ---- 初始化 ----
