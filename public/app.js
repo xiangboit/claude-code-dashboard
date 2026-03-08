@@ -14,6 +14,12 @@ let idleWarningTimer = null;
 let authToken = localStorage.getItem('authToken') || '';
 let currentUser = localStorage.getItem('currentUser') || '';
 
+const openTabs = new Map();
+let activeTabId = null;
+const MAX_TABS = 8;
+let availableAgents = ['claude'];
+let selectedAgent = 'claude';
+
 // ---- 主题切换 ----
 
 function getThemeColor(varName) {
@@ -223,12 +229,21 @@ function logout() {
     currentUser = '';
     localStorage.removeItem('authToken');
     localStorage.removeItem('currentUser');
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    if (ws) {
-        ws.onclose = null; // 阻止触发自动重连
-        ws.close();
-        ws = null;
+    // Close all tabs and their WebSocket connections
+    for (const [id, tab] of openTabs) {
+        if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+        if (tab.ws) {
+            tab.ws.onclose = null;
+            tab.ws.close();
+        }
+        tab.term.dispose();
+        tab.container.remove();
     }
+    openTabs.clear();
+    activeTabId = null;
+    ws = null;
+    term = null;
+    currentSessionId = null;
     appInitialized = false;
     showLogin(true);
 }
@@ -275,52 +290,75 @@ function showToast(message) {
     }, 4000);
 }
 
+// ---- 终端状态栏 ----
+
+let activityTimeout = null;
+
+function setActivityIdle(idle) {
+    const el = document.getElementById('terminalStatusBar');
+    if (!el) return;
+    el.classList.toggle('idle', idle);
+}
+
+function showTerminalStatusBar(projectName, createdAt) {
+    const el = document.getElementById('terminalStatusBar');
+    if (!el) return;
+    const nameEl = document.getElementById('statusProjectName');
+    const timeEl = document.getElementById('statusCreatedAt');
+    if (nameEl) nameEl.textContent = projectName || '';
+    if (timeEl) timeEl.textContent = createdAt ? formatTime(createdAt) : '';
+    el.classList.add('visible');
+}
+
+function hideTerminalStatusBar() {
+    const el = document.getElementById('terminalStatusBar');
+    if (el) el.classList.remove('visible');
+}
+
 // ---- 终端 ----
 
 function changeFontSize(delta) {
-    termFontSize = Math.max(10, Math.min(22, termFontSize + delta));
-    localStorage.setItem('termFontSize', termFontSize);
-    if (term) {
-        term.options.fontSize = termFontSize;
-        setTimeout(doFit, 50);
+    termFontSize = Math.max(8, Math.min(24, termFontSize + delta));
+    for (const tab of openTabs.values()) {
+        tab.term.options.fontSize = termFontSize;
+        tab.fitAddon.fit();
     }
+    localStorage.setItem('termFontSize', termFontSize);
+    doFit();
 }
 
 function initTerminal() {
-    term = new Terminal({
+    window.addEventListener('resize', doFit);
+}
+
+function createTabTerminal(container) {
+    const t = new Terminal({
         cursorBlink: true,
         fontSize: termFontSize,
         fontFamily: 'Monaco, Menlo, "Courier New", monospace',
-        theme: {
-            background: '#1a1a1a',
-            foreground: '#e0e0e0',
-            cursor: '#e0e0e0',
-            selectionBackground: '#3a5a8a'
-        },
+        theme: { background: '#1a1a1a', foreground: '#e0e0e0', cursor: '#e0e0e0', selectionBackground: '#3a5a8a' },
         allowProposedApi: true
     });
-
-    fitAddon = new FitAddon.FitAddon();
-    term.loadAddon(fitAddon);
-
-    term.open(document.getElementById('terminal'));
+    const fa = new FitAddon.FitAddon();
+    t.loadAddon(fa);
+    t.open(container);
 
     let inputBuffer = '';
     let inputTimer = null;
-    const INPUT_FLUSH_DELAY = 40; // ms
-
+    const INPUT_FLUSH_DELAY = 40;
     function flushInput() {
         if (inputBuffer) {
-            wsSend({ type: 'input', data: inputBuffer });
+            const tab = openTabs.get(activeTabId);
+            if (tab && tab.term === t && tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+                tab.ws.send(JSON.stringify({ type: 'input', data: inputBuffer }));
+            }
             inputBuffer = '';
         }
         if (inputTimer) { clearTimeout(inputTimer); inputTimer = null; }
     }
-
-    term.onData((data) => {
+    t.onData((data) => {
         resetIdleWarning();
         inputBuffer += data;
-        // 控制字符（回车、Ctrl+C 等）或转义序列（方向键等）立即发送
         if (data.length > 1 || data.charCodeAt(0) < 32 || data.charCodeAt(0) === 127) {
             flushInput();
         } else {
@@ -328,26 +366,114 @@ function initTerminal() {
             inputTimer = setTimeout(flushInput, INPUT_FLUSH_DELAY);
         }
     });
+    return { term: t, fitAddon: fa };
+}
 
-    window.addEventListener('resize', doFit);
+function createTabWebSocket(tabId, tabInfo) {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const tabWs = new WebSocket(`${protocol}//${location.host}?token=${encodeURIComponent(authToken)}`);
+
+    tabWs.onopen = () => {
+        if (tabInfo.pendingAttach) {
+            tabWs.send(JSON.stringify({ type: 'attach', sessionId: tabInfo.pendingAttach, cols: tabInfo.term.cols, rows: tabInfo.term.rows }));
+        } else if (tabInfo.pendingStart) {
+            const s = tabInfo.pendingStart;
+            tabWs.send(JSON.stringify({ type: 'start', projectId: s.projectId, resume: s.resume, agent: s.agent || tabInfo.agent, cols: tabInfo.term.cols, rows: tabInfo.term.rows }));
+        }
+    };
+
+    tabWs.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'output') {
+            tabInfo.term.write(msg.data);
+            if (tabInfo.sessionId === activeTabId) {
+                setActivityIdle(false);
+                if (activityTimeout) clearTimeout(activityTimeout);
+                activityTimeout = setTimeout(() => setActivityIdle(true), 5000);
+            }
+        } else if (msg.type === 'replay') {
+            tabInfo.term.write(msg.data);
+        } else if (msg.type === 'started') {
+            const oldId = tabInfo.sessionId;
+            tabInfo.sessionId = msg.sessionId;
+            if (msg.agent) tabInfo.agent = msg.agent;
+            if (oldId !== msg.sessionId) {
+                openTabs.delete(oldId);
+                openTabs.set(msg.sessionId, tabInfo);
+                if (activeTabId === oldId) activeTabId = msg.sessionId;
+            }
+            tabInfo.createdAt = msg.createdAt;
+            currentSessionId = activeTabId;
+            syncActiveTab();
+            hideSessionActions();
+            document.getElementById('killBtn').style.display = '';
+            document.getElementById('fontSizeControls').style.display = '';
+            document.getElementById('newSessionBtn').style.display = '';
+            resetIdleWarning();
+            loadSessions();
+            renderTabBar();
+            if (tabInfo.sessionId === activeTabId) {
+                showTerminalStatusBar(tabInfo.projectName, msg.createdAt);
+            }
+        } else if (msg.type === 'attached') {
+            tabInfo.sessionId = msg.sessionId;
+            if (msg.agent) tabInfo.agent = msg.agent;
+            tabInfo.createdAt = msg.createdAt;
+            currentSessionId = activeTabId;
+            syncActiveTab();
+            hideSessionActions();
+            document.getElementById('killBtn').style.display = '';
+            document.getElementById('fontSizeControls').style.display = '';
+            document.getElementById('newSessionBtn').style.display = '';
+            resetIdleWarning();
+            loadSessions();
+            renderTabBar();
+            if (tabInfo.sessionId === activeTabId) {
+                showTerminalStatusBar(tabInfo.projectName, msg.createdAt);
+            }
+        } else if (msg.type === 'exit') {
+            loadSessions();
+            closeTab(tabInfo.sessionId);
+        } else if (msg.type === 'notify') {
+            showToast(msg.message);
+            loadSessions();
+        } else if (msg.type === 'error') {
+            tabInfo.term.writeln('\r\n\x1b[31m' + msg.data + '\x1b[0m');
+        } else if (msg.type === 'detached') {
+            tabInfo.term.writeln('\r\n\x1b[33m--- 会话已被其他连接接管 ---\x1b[0m');
+        }
+    };
+
+    tabWs.onclose = () => {
+        if (openTabs.has(tabInfo.sessionId)) {
+            const banner = document.getElementById('reconnectBanner');
+            if (tabInfo.sessionId === activeTabId && banner) banner.classList.add('active');
+            tabInfo.reconnectTimer = setTimeout(() => {
+                if (openTabs.has(tabInfo.sessionId)) {
+                    tabInfo.pendingAttach = tabInfo.sessionId;
+                    tabInfo.pendingStart = null;
+                    tabInfo.ws = createTabWebSocket(tabInfo.sessionId, tabInfo);
+                }
+            }, 3000);
+        }
+    };
+
+    return tabWs;
 }
 
 function doFit() {
-    const wrapper = document.getElementById('terminalWrapper');
-    if (!wrapper.classList.contains('active')) return;
-
-    const rect = wrapper.getBoundingClientRect();
-    const termEl = document.getElementById('terminal');
-    termEl.style.width = rect.width + 'px';
-    termEl.style.height = rect.height + 'px';
-
-    fitAddon.fit();
-
-    if (term.cols !== lastCols || term.rows !== lastRows) {
-        lastCols = term.cols;
-        lastRows = term.rows;
-        wsSend({ type: 'resize', cols: term.cols, rows: term.rows });
-    }
+    const tab = openTabs.get(activeTabId);
+    const activeFitAddon = tab ? tab.fitAddon : fitAddon;
+    const activeTerm = tab ? tab.term : term;
+    if (!activeFitAddon || !activeTerm) return;
+    try {
+        activeFitAddon.fit();
+        // send resize to active tab's ws
+        const activeWs = tab ? tab.ws : ws;
+        if (activeTerm.cols && activeTerm.rows && activeWs && activeWs.readyState === WebSocket.OPEN) {
+            activeWs.send(JSON.stringify({ type: 'resize', cols: activeTerm.cols, rows: activeTerm.rows }));
+        }
+    } catch {}
 }
 
 // ---- WebSocket ----
@@ -357,75 +483,163 @@ let reconnectDelay = 3000;
 const RECONNECT_MAX_DELAY = 30000;
 
 function connectWebSocket() {
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${protocol}//${location.host}?token=${encodeURIComponent(authToken)}`);
-
-    ws.onopen = () => {
-        reconnectDelay = 3000;
-        const banner = document.getElementById('reconnectBanner');
-        if (banner) banner.classList.remove('active');
-        // 执行 pending action（如 reconnect 触发的新建会话）
-        if (pendingAction) {
-            const action = pendingAction;
-            pendingAction = null;
-            action();
-        } else if (currentSessionId) {
-            attachSession(currentSessionId);
-        }
-    };
-
-    ws.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'output') {
-            term.write(msg.data);
-        } else if (msg.type === 'replay') {
-            term.write(msg.data);
-        } else if (msg.type === 'started') {
-            currentSessionId = msg.sessionId;
-            hideSessionActions();
-            document.getElementById('killBtn').style.display = '';
-            document.getElementById('fontSizeControls').style.display = '';
-            document.getElementById('newSessionBtn').style.display = '';
-            resetIdleWarning();
-            loadSessions();
-        } else if (msg.type === 'attached') {
-            currentSessionId = msg.sessionId;
-            hideSessionActions();
-            document.getElementById('killBtn').style.display = '';
-            document.getElementById('fontSizeControls').style.display = '';
-            document.getElementById('newSessionBtn').style.display = '';
-            resetIdleWarning();
-            loadSessions();
-        } else if (msg.type === 'detached') {
-            term.writeln('\r\n\x1b[33m--- 会话已被其他连接接管 ---\x1b[0m');
-        } else if (msg.type === 'exit') {
-            currentSessionId = null;
-            document.getElementById('killBtn').style.display = 'none';
-            document.getElementById('fontSizeControls').style.display = 'none';
-            clearIdleWarning();
-            showSessionActions();
-            loadSessions().then(() => showDashboardPanel());
-        } else if (msg.type === 'notify') {
-            showToast(msg.message);
-            loadSessions();
-        } else if (msg.type === 'error') {
-            term.writeln(`\r\n\x1b[31m${msg.data}\x1b[0m`);
-        }
-    };
-
-    ws.onclose = () => {
-        const banner = document.getElementById('reconnectBanner');
-        if (banner) banner.classList.add('active');
-        reconnectTimer = setTimeout(connectWebSocket, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_DELAY);
-    };
+    // Tab system manages per-tab WebSocket connections
 }
 
 function wsSend(msg) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(msg));
+    const tab = openTabs.get(activeTabId);
+    const activeWs = tab ? tab.ws : ws;
+    if (activeWs && activeWs.readyState === WebSocket.OPEN) {
+        activeWs.send(JSON.stringify(msg));
+    }
+}
+
+// ---- Tab Management ----
+
+function openTab(projectId, sessionId, resume, agent) {
+    if (sessionId && openTabs.has(sessionId)) {
+        switchTab(sessionId);
+        return;
+    }
+    if (openTabs.size >= MAX_TABS) {
+        showToast('标签页已达上限 (' + MAX_TABS + ')，请关闭一些标签');
+        return;
+    }
+
+    const tabAgent = agent || selectedAgent || 'claude';
+    const project = projectsCache.find(p => p.id === projectId);
+    const projectName = project ? project.name : projectId;
+    const tabId = sessionId || ('new-' + Date.now());
+
+    const container = document.createElement('div');
+    container.className = 'tab-terminal';
+    container.dataset.session = tabId;
+    document.getElementById('terminalContainer').appendChild(container);
+
+    const { term: t, fitAddon: fa } = createTabTerminal(container);
+
+    const tabInfo = {
+        sessionId: tabId,
+        projectId,
+        projectName,
+        agent: tabAgent,
+        term: t,
+        fitAddon: fa,
+        container,
+        ws: null,
+        createdAt: Date.now(),
+        reconnectTimer: null,
+        pendingAttach: sessionId || null,
+        pendingStart: sessionId ? null : { projectId, resume: !!resume, agent: tabAgent },
+    };
+
+    openTabs.set(tabId, tabInfo);
+    tabInfo.ws = createTabWebSocket(tabId, tabInfo);
+
+    hideDashboardPanel();
+    document.getElementById('emptyState').classList.add('hidden');
+    document.getElementById('terminalWrapper').classList.add('active');
+
+    switchTab(tabId);
+}
+
+function switchTab(sessionId) {
+    if (!openTabs.has(sessionId)) return;
+
+    if (activeTabId && openTabs.has(activeTabId)) {
+        openTabs.get(activeTabId).container.classList.remove('active');
+    }
+
+    activeTabId = sessionId;
+    const tab = openTabs.get(sessionId);
+    tab.container.classList.add('active');
+
+    syncActiveTab();
+
+    const project = projectsCache.find(p => p.id === tab.projectId);
+    if (project) {
+        currentProject = project;
+        document.getElementById('projectTitle').textContent = project.name;
+        document.getElementById('headerProjectPath').textContent = project.path;
+        document.getElementById('projectSwitchLabel').textContent = project.name;
+    }
+    renderProjects();
+    renderTabBar();
+
+    setTimeout(() => {
+        tab.fitAddon.fit();
+        tab.term.focus();
+    }, 50);
+
+    if (tab.createdAt) {
+        showTerminalStatusBar(tab.projectName, tab.createdAt);
+    }
+}
+
+function closeTab(sessionId) {
+    const tab = openTabs.get(sessionId);
+    if (!tab) return;
+
+    if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+    if (tab.ws && tab.ws.readyState === WebSocket.OPEN) tab.ws.close();
+    tab.term.dispose();
+    tab.container.remove();
+    openTabs.delete(sessionId);
+
+    if (activeTabId === sessionId) {
+        const remaining = [...openTabs.keys()];
+        if (remaining.length > 0) {
+            switchTab(remaining[remaining.length - 1]);
+        } else {
+            activeTabId = null;
+            term = null;
+            ws = null;
+            currentSessionId = null;
+            document.getElementById('killBtn').style.display = 'none';
+            document.getElementById('fontSizeControls').style.display = 'none';
+            hideTerminalStatusBar();
+            clearIdleWarning();
+            renderTabBar();
+            if (currentProject) {
+                loadSessions().then(() => showDashboardPanel());
+            } else {
+                document.getElementById('terminalWrapper').classList.remove('active');
+                document.getElementById('emptyState').classList.remove('hidden');
+            }
+        }
+    } else {
+        renderTabBar();
+    }
+}
+
+function renderTabBar() {
+    const tabBar = document.getElementById('tabBar');
+    if (!tabBar) return;
+    if (openTabs.size === 0) {
+        tabBar.classList.remove('visible');
+        tabBar.innerHTML = '';
+        return;
+    }
+    tabBar.classList.add('visible');
+    const multiAgent = availableAgents.length > 1;
+    tabBar.innerHTML = [...openTabs.values()].map(t => {
+        const isActive = t.sessionId === activeTabId;
+        const agentLabel = multiAgent && t.agent ? '<span style="font-size:9px;opacity:0.6;margin-right:2px">' + escapeHtml(t.agent) + '</span>' : '';
+        return '<div class="tab-item' + (isActive ? ' active' : '') + '" onclick="switchTab(\'' + escapeHtml(t.sessionId) + '\')" title="' + escapeHtml(t.projectName) + ' (' + escapeHtml(t.agent || 'claude') + ')">' +
+            agentLabel +
+            '<span class="tab-name">' + escapeHtml(t.projectName) + '</span>' +
+            '<span class="tab-close" onclick="event.stopPropagation();closeTab(\'' + escapeHtml(t.sessionId) + '\')">&times;</span>' +
+            '</div>';
+    }).join('');
+}
+
+function syncActiveTab() {
+    const tab = openTabs.get(activeTabId);
+    if (tab) {
+        term = tab.term;
+        ws = tab.ws;
+        fitAddon = tab.fitAddon;
+        currentSessionId = tab.sessionId;
     }
 }
 
@@ -454,24 +668,16 @@ function attachSession(sessionId) {
 }
 
 async function killSession(sessionId) {
-    const id = sessionId || currentSessionId;
-    if (!id) return;
-    try {
-        await authFetch(`/api/sessions/${id}`, { method: 'DELETE' });
-    } catch {}
-    // 主动刷新，不依赖 onExit 推送
+    const targetId = sessionId || activeTabId;
+    if (!targetId) return;
+    try { await authFetch('/api/sessions/' + targetId, { method: 'DELETE' }); } catch {}
+    closeTab(targetId);
     loadSessions();
 }
 
 function reconnect(resume) {
     if (!currentProject) return;
-    hideSessionActions();
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-        pendingAction = () => startNewSession(currentProject.id, resume);
-        connectWebSocket();
-    } else {
-        startNewSession(currentProject.id, resume);
-    }
+    openTab(currentProject.id, null, resume);
 }
 
 // ---- 会话管理 ----
@@ -528,6 +734,7 @@ function renderSessions() {
             <div class="session-info">
                 <span class="session-dot"></span>
                 <span class="session-name">${name}</span>
+                ${availableAgents.length > 1 && s.agent ? '<span style="font-size:9px;color:var(--c-text-dim);margin-left:2px">' + escapeHtml(s.agent) + '</span>' : ''}
                 <span class="session-time">${formatTime(s.createdAt)}</span>
             </div>
             <button class="session-close" onclick="event.stopPropagation();killSession('${escapeHtml(s.id)}')" title="关闭">&times;</button>
@@ -537,7 +744,7 @@ function renderSessions() {
 
 async function resumeStaleSession(staleId, projectId) {
     // 清除 stale 记录，然后对该项目发起 claude --resume
-    try { await authFetch(`/api/sessions/${staleId}`, { method: 'DELETE' }); } catch {}
+    try { await authFetch('/api/sessions/' + staleId, { method: 'DELETE' }); } catch {}
     const project = projectsCache.find(p => p.id === projectId);
     if (project) {
         currentProject = project;
@@ -545,16 +752,8 @@ async function resumeStaleSession(staleId, projectId) {
         document.getElementById('headerProjectPath').textContent = project.path;
         document.getElementById('projectSwitchLabel').textContent = project.name;
     }
-    document.getElementById('emptyState').classList.add('hidden');
-    document.getElementById('terminalWrapper').classList.add('active');
     closeSidebar();
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        startNewSession(projectId, true);
-    } else {
-        pendingAction = () => startNewSession(projectId, true);
-        connectWebSocket();
-    }
-    term.focus();
+    openTab(projectId, null, true);
 }
 
 function switchSession(sessionId, projectId) {
@@ -573,14 +772,11 @@ function switchSession(sessionId, projectId) {
     renderProjects();
     closeSidebar();
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        attachSession(sessionId);
+    if (openTabs.has(sessionId)) {
+        switchTab(sessionId);
     } else {
-        currentSessionId = sessionId;
-        connectWebSocket();
+        openTab(projectId, sessionId);
     }
-
-    term.focus();
 }
 
 // ---- 项目列表 ----
@@ -589,6 +785,35 @@ async function loadProjects() {
     const response = await authFetch('/api/projects');
     projectsCache = await response.json();
     await loadSessions();
+}
+
+async function loadAgents() {
+    try {
+        const res = await authFetch('/api/agents');
+        if (res.ok) {
+            const agents = await res.json();
+            availableAgents = agents.map(a => a.name);
+            renderAgentSelector();
+        }
+    } catch {}
+}
+
+function renderAgentSelector() {
+    const el = document.getElementById('agentSelector');
+    if (!el) return;
+    if (availableAgents.length <= 1) {
+        el.style.display = 'none';
+        return;
+    }
+    el.style.display = '';
+    el.innerHTML = availableAgents.map(a =>
+        `<button class="btn agent-btn${a === selectedAgent ? ' active' : ''}" onclick="selectAgent('${escapeHtml(a)}')">${escapeHtml(a)}</button>`
+    ).join('');
+}
+
+function selectAgent(agent) {
+    selectedAgent = agent;
+    renderAgentSelector();
 }
 
 const GIT_URL_RE = /^(https?:\/\/|git@|ssh:\/\/).+/;
@@ -703,18 +928,27 @@ async function selectProject(projectId) {
     const liveSessions = getProjectSessions(projectId).filter(s => !s.stale);
     const latest = getLatestSession(liveSessions);
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        if (latest) {
-            attachSession(latest.id);
-        } else {
-            startNewSession(projectId);
+    // Check if any tab already has this project's session open
+    if (latest) {
+        const existingTab = openTabs.get(latest.id);
+        if (existingTab) {
+            switchTab(latest.id);
+            return;
         }
-    } else {
-        currentSessionId = latest ? latest.id : null;
-        connectWebSocket();
+    }
+    // Check if any tab is open for this project at all
+    for (const [id, tab] of openTabs) {
+        if (tab.projectId === projectId) {
+            switchTab(id);
+            return;
+        }
     }
 
-    term.focus();
+    if (latest) {
+        openTab(projectId, latest.id);
+    } else {
+        openTab(projectId, null, false);
+    }
 }
 
 // ---- Clone ----
@@ -862,6 +1096,28 @@ function hideDashboardPanel() {
     document.getElementById('dashboardPanel').classList.remove('active');
 }
 
+function toggleDashboardPanel() {
+    const panel = document.getElementById('dashboardPanel');
+    if (panel.classList.contains('active')) {
+        hideDashboardPanel();
+        if (openTabs.size > 0) {
+            document.getElementById('terminalWrapper').classList.add('active');
+            if (activeTabId) {
+                const tab = openTabs.get(activeTabId);
+                if (tab) { tab.fitAddon.fit(); tab.term.focus(); }
+            }
+        } else {
+            document.getElementById('emptyState').classList.remove('hidden');
+        }
+    } else {
+        if (currentProject) {
+            showDashboardPanel();
+        } else {
+            showToast('请先选择一个项目');
+        }
+    }
+}
+
 function updateHealthUI(data) {
     // Status bar
     const el1 = document.getElementById('statusSessions');
@@ -958,6 +1214,7 @@ function initApp() {
     appInitialized = true;
     initTerminal();
     loadProjects();
+    loadAgents();
     connectWebSocket();
     refreshHealth();
     setInterval(refreshHealth, 10000);
@@ -969,7 +1226,10 @@ async function killAllSessions() {
     if (!confirm('确定关闭所有会话？')) return;
     const ids = sessionsCache.map(s => s.id);
     for (const id of ids) {
-        try { await authFetch(`/api/sessions/${id}`, { method: 'DELETE' }); } catch {}
+        try { await authFetch('/api/sessions/' + id, { method: 'DELETE' }); } catch {}
+    }
+    for (const id of [...openTabs.keys()]) {
+        closeTab(id);
     }
     loadSessions();
 }

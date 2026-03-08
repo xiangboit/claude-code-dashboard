@@ -10,7 +10,7 @@ const pty = require('node-pty');
 const Database = require('better-sqlite3');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -183,13 +183,17 @@ app.post('/api/clipboard', (req, res) => {
   }
 });
 
-// 自动检测 claude 路径
-let claudePath;
-try {
-  claudePath = execFileSync('which', ['claude'], { encoding: 'utf8' }).trim();
-} catch {
-  claudePath = '/opt/homebrew/bin/claude';
+// 自动检测 CLI 路径
+const agentPaths = {};
+for (const cmd of ['claude', 'codex']) {
+  try {
+    agentPaths[cmd] = execFileSync('which', [cmd], { encoding: 'utf8' }).trim();
+  } catch {
+    agentPaths[cmd] = null;
+  }
 }
+if (!agentPaths.claude) agentPaths.claude = '/opt/homebrew/bin/claude';
+const claudePath = agentPaths.claude;
 
 // ---- 会话记录 ----
 
@@ -326,7 +330,8 @@ function killPty(p) {
   try { p.kill(); } catch {}
 }
 
-function createSession(projectId, cols, rows, resume, owner) {
+function createSession(projectId, cols, rows, resume, owner, extraArgs, agent) {
+  agent = agent || 'claude';
   if (sessions.size >= MAX_SESSIONS_GLOBAL) return { error: '全局会话数已达上限' };
   let userCount = 0;
   for (const s of sessions.values()) { if (s.owner === owner) userCount++; }
@@ -335,13 +340,23 @@ function createSession(projectId, cols, rows, resume, owner) {
   const project = scanProjects().find(p => p.id === projectId);
   if (!project) return null;
 
+  const binPath = agentPaths[agent];
+  if (!binPath) return { error: `${agent} 未安装或未找到` };
+
   const sessionId = generateSessionId();
   const env = { ...process.env };
-  delete env.CLAUDECODE;
+  let args = [];
 
-  const args = resume ? ['--resume'] : [];
+  if (agent === 'claude') {
+    delete env.CLAUDECODE;
+    if (resume) args.push('--resume');
+  } else if (agent === 'codex') {
+    args.push('--no-alt-screen');
+    if (resume) args = ['resume', '--last', '--no-alt-screen'];
+  }
+  if (extraArgs) args.push(...extraArgs);
 
-  const ptyProcess = pty.spawn(claudePath, args, {
+  const ptyProcess = pty.spawn(binPath, args, {
     name: 'xterm-256color',
     cols: cols || 80,
     rows: rows || 24,
@@ -353,6 +368,7 @@ function createSession(projectId, cols, rows, resume, owner) {
     pty: ptyProcess,
     buffer: '',
     projectId,
+    agent,
     owner: owner || '',
     createdAt: Date.now(),
     lastActivity: Date.now(),
@@ -380,7 +396,7 @@ function createSession(projectId, cols, rows, resume, owner) {
           client.send(JSON.stringify({
             type: 'notify',
             projectId,
-            message: `${projectId} 的 Claude 会话已结束`
+            message: `${projectId} 的 ${agent} 会话已结束`
           }));
         }
       });
@@ -436,6 +452,7 @@ app.get('/api/sessions', (req, res) => {
     list.push({
       id,
       projectId: session.projectId,
+      agent: session.agent || 'claude',
       createdAt: session.createdAt,
       lastActivity: session.lastActivity,
       attached: !!session.attachedWs,
@@ -474,6 +491,14 @@ app.delete('/api/sessions/:id', (req, res) => {
   // stale session
   recordSessionEnd(req.params.id);
   res.json({ success: true });
+});
+
+// 可用 Agent 列表
+app.get('/api/agents', (req, res) => {
+  const agents = Object.entries(agentPaths)
+    .filter(([, p]) => p)
+    .map(([name, p]) => ({ name, path: p }));
+  res.json(agents);
 });
 
 // 健康检查 API
@@ -535,7 +560,7 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'start') {
-      const result = createSession(msg.projectId, msg.cols, msg.rows, msg.resume, username);
+      const result = createSession(msg.projectId, msg.cols, msg.rows, msg.resume, username, null, msg.agent);
       if (!result) {
         ws.send(JSON.stringify({ type: 'error', data: '项目不存在' }));
         return;
@@ -548,7 +573,8 @@ wss.on('connection', (ws, req) => {
       if (currentSessionId) detachSession(currentSessionId);
       currentSessionId = sessionId;
       attachSession(sessionId, ws);
-      ws.send(JSON.stringify({ type: 'started', sessionId }));
+      const startedSession = sessions.get(sessionId);
+      ws.send(JSON.stringify({ type: 'started', sessionId, agent: startedSession ? startedSession.agent : 'claude' }));
 
     } else if (msg.type === 'attach') {
       const session = sessions.get(msg.sessionId);
@@ -569,7 +595,7 @@ wss.on('connection', (ws, req) => {
       if (session.buffer) {
         ws.send(JSON.stringify({ type: 'replay', data: session.buffer }));
       }
-      ws.send(JSON.stringify({ type: 'attached', sessionId: msg.sessionId }));
+      ws.send(JSON.stringify({ type: 'attached', sessionId: msg.sessionId, agent: session.agent || 'claude' }));
 
     } else if (msg.type === 'input') {
       const session = currentSessionId && sessions.get(currentSessionId);
@@ -591,7 +617,9 @@ wss.on('connection', (ws, req) => {
 if (require.main === module) {
   server.listen(PORT, () => {
     console.log(`Dashboard running on http://localhost:${PORT}`);
-    console.log(`Claude path: ${claudePath}`);
+    for (const [cmd, p] of Object.entries(agentPaths)) {
+      console.log(`${cmd}: ${p || '(not found)'}`);
+    }
   });
 }
 

@@ -427,6 +427,22 @@
             color: var(--c-btn-hover-text);
         }
 
+        #agentSelector { display: inline-flex; }
+        .agent-btn {
+            padding: 3px 10px;
+            font-size: 11px;
+            border: 1px solid var(--c-border);
+            color: var(--c-text-dim);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        .agent-btn.active {
+            border-color: var(--c-accent);
+            color: var(--c-accent);
+            background: rgba(74, 144, 226, 0.1);
+        }
+
         /* 汉堡菜单按钮 */
         .menu-btn {
             display: block;
@@ -452,8 +468,65 @@
         }
 
         .terminal-wrapper.active {
-            display: block;
+            display: flex;
+            flex-direction: column;
         }
+
+        .tab-bar {
+            display: none;
+            align-items: center;
+            gap: 2px;
+            padding: 4px 8px;
+            background: var(--c-surface);
+            border-bottom: 1px solid var(--c-border);
+            min-height: 32px;
+            overflow-x: auto;
+            flex-shrink: 0;
+        }
+        .tab-bar.visible { display: flex; }
+        .tab-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 4px 4px 0 0;
+            font-size: 11px;
+            color: var(--c-text-muted);
+            background: transparent;
+            cursor: pointer;
+            white-space: nowrap;
+            border: 1px solid transparent;
+            border-bottom: none;
+            transition: all var(--transition-fast);
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            user-select: none;
+        }
+        .tab-item:hover { background: var(--c-surface-hover); color: var(--c-text-secondary); }
+        .tab-item.active {
+            background: var(--c-bg);
+            color: var(--c-text);
+            border-color: var(--c-border);
+        }
+        .tab-item .tab-name { overflow: hidden; text-overflow: ellipsis; }
+        .tab-close {
+            font-size: 14px;
+            color: var(--c-text-dim);
+            cursor: pointer;
+            line-height: 1;
+            padding: 0 2px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+        .tab-close:hover { color: var(--c-red); background: rgba(255,107,107,0.1); }
+        .terminal-container { flex: 1; position: relative; overflow: hidden; }
+        .tab-terminal {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: none;
+        }
+        .tab-terminal.active { display: block; }
 
         .empty-state {
             flex: 1;
@@ -1281,8 +1354,10 @@
                 <div class="session-actions" id="sessionActions">
                     <button class="btn btn-resume" onclick="reconnect(true)">恢复对话</button>
                 </div>
+                <div id="agentSelector" style="display:none;gap:2px;align-items:center"></div>
                 <button class="btn btn-new" id="newSessionBtn" onclick="reconnect(false)" style="display:none" title="新建会话 (Ctrl/⌘+N)">+ 新对话</button>
                 <button class="btn btn-kill" id="killBtn" onclick="killSession()">关闭会话</button>
+                <button class="btn-font" id="dashboardToggleBtn" onclick="toggleDashboardPanel()" title="项目面板" aria-label="切换面板">&#9636; 面板</button>
                 <div class="font-size-controls" id="fontSizeControls" style="display:none">
                     <button class="btn-font" onclick="changeFontSize(-1)" title="缩小字体">A-</button>
                     <button class="btn-font" onclick="changeFontSize(1)" title="放大字体">A+</button>
@@ -1337,7 +1412,8 @@
         </div>
 
         <div class="terminal-wrapper" id="terminalWrapper">
-            <div id="terminal"></div>
+            <div class="tab-bar" id="tabBar"></div>
+            <div class="terminal-container" id="terminalContainer"></div>
         </div>
     </div>
 
