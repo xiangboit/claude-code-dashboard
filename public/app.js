@@ -36,6 +36,9 @@ let selectedAgent = 'claude';
 let settingsRoots = [];
 const worktreeCache = {}; // projectId → { data: [...], expanded: false }
 
+// ---- Yolo 模式 (--dangerously-skip-permissions) ----
+let yoloMode = localStorage.getItem('yoloMode') === 'true';
+
 // ---- 主题切换 ----
 
 function getThemeColor(varName) {
@@ -445,6 +448,14 @@ function changeFontSize(delta) {
     doFit();
 }
 
+function toggleYoloMode() {
+    yoloMode = !yoloMode;
+    localStorage.setItem('yoloMode', yoloMode);
+    const toggle = document.getElementById('yoloToggle');
+    if (toggle) toggle.checked = yoloMode;
+    showToast(yoloMode ? '已开启无确认模式' : '已关闭无确认模式');
+}
+
 function initTerminal() {
     window.addEventListener('resize', doFit);
 }
@@ -496,7 +507,7 @@ function createTabWebSocket(tabId, tabInfo) {
             tabWs.send(JSON.stringify({ type: 'attach', sessionId: tabInfo.pendingAttach, cols: tabInfo.term.cols, rows: tabInfo.term.rows }));
         } else if (tabInfo.pendingStart) {
             const s = tabInfo.pendingStart;
-            const startMsg = { type: 'start', projectId: s.projectId, resume: s.resume, agent: s.agent || tabInfo.agent, cols: tabInfo.term.cols, rows: tabInfo.term.rows };
+            const startMsg = { type: 'start', projectId: s.projectId, resume: s.resume, agent: s.agent || tabInfo.agent, cols: tabInfo.term.cols, rows: tabInfo.term.rows, yolo: !!s.yolo };
             if (s.cwd) startMsg.cwd = s.cwd;
             tabWs.send(JSON.stringify(startMsg));
         }
@@ -663,7 +674,7 @@ function openTab(projectId, sessionId, resume, agent, cwd) {
         createdAt: Date.now(),
         reconnectTimer: null,
         pendingAttach: sessionId || null,
-        pendingStart: sessionId ? null : { projectId, resume: !!resume, agent: tabAgent, cwd },
+        pendingStart: sessionId ? null : { projectId, resume: !!resume, agent: tabAgent, cwd, yolo: yoloMode },
     };
 
     openTabs.set(tabId, tabInfo);
@@ -785,7 +796,7 @@ function startNewSession(projectId, resume) {
     hideSessionActions();
     setTimeout(() => {
         doFit();
-        wsSend({ type: 'start', projectId, resume: !!resume, cols: term.cols, rows: term.rows });
+        wsSend({ type: 'start', projectId, resume: !!resume, cols: term.cols, rows: term.rows, yolo: yoloMode });
     }, 50);
 }
 
@@ -1581,6 +1592,8 @@ function initApp() {
     refreshHealth();
     const fsl = document.getElementById('fontSizeLabel');
     if (fsl) fsl.textContent = termFontSize + 'px';
+    const yoloToggle = document.getElementById('yoloToggle');
+    if (yoloToggle) yoloToggle.checked = yoloMode;
     setInterval(refreshHealth, 10000);
     setInterval(loadTasks, 15000);
     // 粒子系统
@@ -1781,6 +1794,7 @@ async function doCreateTask() {
         const prompt = document.getElementById('taskPrompt').value.trim();
         const cron_expr = document.getElementById('taskCron').value.trim();
         const execution_mode = document.querySelector('input[name="taskMode"]:checked').value;
+        const dangerously_skip_permissions = document.getElementById('taskYolo').checked;
         const errorEl = document.getElementById('createTaskError');
 
         if (!name || !project_id || !prompt) { errorEl.textContent = '名称、项目和 Prompt 不能为空'; return; }
@@ -1789,7 +1803,7 @@ async function doCreateTask() {
             const res = await authFetch('/api/tasks', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, project_id, prompt, cron_expr: cron_expr || undefined, execution_mode })
+                body: JSON.stringify({ name, project_id, prompt, cron_expr: cron_expr || undefined, execution_mode, dangerously_skip_permissions })
             });
             const data = await res.json();
             if (res.ok) {
@@ -1818,7 +1832,9 @@ function showTaskDetail(taskId) {
     const project = projectsCache.find(p => p.id === task.project_id);
     document.getElementById('taskDetailProject').textContent = project ? project.name : task.project_id;
     document.getElementById('taskDetailCron').textContent = task.cron_expr || '仅手动';
-    document.getElementById('taskDetailMode').textContent = task.execution_mode === 'resume' ? '恢复会话' : '新会话';
+    document.getElementById('taskDetailMode').textContent =
+        (task.execution_mode === 'resume' ? '恢复会话' : '新会话') +
+        (task.dangerously_skip_permissions ? ' · 无确认' : '');
     document.getElementById('taskDetailPrompt').textContent = task.prompt;
 
     // Actions

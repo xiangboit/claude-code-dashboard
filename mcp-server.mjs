@@ -49,6 +49,7 @@ server.tool(
     cron_expr: z.string().optional().describe('Cron expression (5-field, e.g. "0 */5 * * *"). Omit for manual-only'),
     execution_mode: z.enum(['new', 'resume']).default('new').describe('"new" starts fresh session, "resume" continues last conversation'),
     max_concurrency: z.number().int().min(0).max(10).default(1).describe('Max concurrent runs (0=unlimited, 1=serial)'),
+    dangerously_skip_permissions: z.boolean().default(true).describe('Skip all confirmation prompts (--dangerously-skip-permissions). Default true for automated tasks'),
   },
   async (params) => {
     try {
@@ -104,7 +105,7 @@ server.tool(
         const cronInfo = t.cron_expr || 'manual only';
         return [
           `[${t.id}] ${t.name}`,
-          `  Project: ${t.project_id} | Mode: ${t.execution_mode} | ${t.enabled ? 'ENABLED' : 'DISABLED'}`,
+          `  Project: ${t.project_id} | Mode: ${t.execution_mode} | ${t.enabled ? 'ENABLED' : 'DISABLED'} | Yolo: ${t.dangerously_skip_permissions ? 'ON' : 'OFF'}`,
           `  Cron: ${cronInfo} | Concurrency: ${t.max_concurrency} | Running: ${t.runningCount || 0}`,
           `  ${runInfo}`,
         ].join('\n');
@@ -134,7 +135,24 @@ server.tool(
   }
 );
 
-// Tool 5: get_task_log
+// Tool 5: delete_task
+server.tool(
+  'delete_task',
+  'Delete a scheduled task permanently, including all its run history and logs',
+  {
+    task_id: z.string().describe('The task ID to delete'),
+  },
+  async ({ task_id }) => {
+    try {
+      await apiCall('DELETE', `/api/tasks/${encodeURIComponent(task_id)}`);
+      return { content: [{ type: 'text', text: `Task ${task_id} deleted successfully.` }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: `Error deleting task: ${e.message}` }], isError: true };
+    }
+  }
+);
+
+// Tool 6: get_task_log
 server.tool(
   'get_task_log',
   'Get the execution log of a specific task run',

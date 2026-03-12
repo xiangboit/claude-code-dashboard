@@ -309,6 +309,9 @@ db.exec(`
 db.exec('CREATE INDEX IF NOT EXISTS idx_task_runs_task_id ON task_runs(task_id, started_at DESC)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_task_runs_finished ON task_runs(finished_at)');
 
+// 迁移: 添加 dangerously_skip_permissions 列
+try { db.exec('ALTER TABLE scheduled_tasks ADD COLUMN dangerously_skip_permissions INTEGER NOT NULL DEFAULT 1'); } catch {}
+
 // 启动时清理孤儿运行记录
 db.prepare("UPDATE task_runs SET status='failed', finished_at=?, error='Server restarted' WHERE status='running'").run(Date.now());
 
@@ -411,8 +414,8 @@ function executeTask(task) {
 
   const resume = task.execution_mode === 'resume';
   // --print: non-interactive plain text output (no TUI, clean logs)
-  // --dangerously-skip-permissions: unattended execution, no confirmation prompts
-  const extraArgs = ['--print', '--dangerously-skip-permissions'];
+  const extraArgs = ['--print'];
+  if (task.dangerously_skip_permissions) extraArgs.push('--dangerously-skip-permissions');
   if (task.prompt) extraArgs.push(task.prompt);
 
   const result = createSession(task.project_id, 80, 24, resume, task.owner, extraArgs);
@@ -636,7 +639,7 @@ function stripAnsi(str) {
     .replace(/\n{3,}/g, '\n\n');                    // collapse excessive blank lines
 }
 
-function createSession(projectId, cols, rows, resume, owner, extraArgs, agent) {
+function createSession(projectId, cols, rows, resume, owner, extraArgs, agent, yolo) {
   agent = agent || 'claude';
   if (sessions.size >= MAX_SESSIONS_GLOBAL) return { error: '全局会话数已达上限' };
   let userCount = 0;
@@ -663,6 +666,7 @@ function createSession(projectId, cols, rows, resume, owner, extraArgs, agent) {
   if (agent === 'claude') {
     delete env.CLAUDECODE;
     if (resume) args.push('--resume');
+    if (yolo) args.push('--dangerously-skip-permissions');
   } else if (agent === 'codex') {
     args.push('--no-alt-screen');
     if (resume) args = ['resume', '--last', '--no-alt-screen'];
@@ -899,7 +903,7 @@ const MAX_TOTAL_TASKS = parseInt(process.env.MAX_TOTAL_TASKS) || 50;
 app.post('/api/tasks', (req, res) => {
   const taskCount = db.prepare('SELECT COUNT(*) AS cnt FROM scheduled_tasks').get().cnt;
   if (taskCount >= MAX_TOTAL_TASKS) return res.status(400).json({ error: `任务数已达上限 (${MAX_TOTAL_TASKS})` });
-  const { name, project_id, prompt, cron_expr, execution_mode, max_concurrency } = req.body;
+  const { name, project_id, prompt, cron_expr, execution_mode, max_concurrency, dangerously_skip_permissions } = req.body;
   if (!name || !project_id || !prompt) return res.status(400).json({ error: '名称、项目和 Prompt 不能为空' });
   if (cron_expr && !cron.validate(cron_expr)) return res.status(400).json({ error: 'Cron 表达式无效' });
   const project = scanProjects().find(p => p.id === project_id);
@@ -907,9 +911,9 @@ app.post('/api/tasks', (req, res) => {
 
   const id = crypto.randomBytes(8).toString('hex');
   const now = Date.now();
-  db.prepare(`INSERT INTO scheduled_tasks (id, name, project_id, owner, prompt, cron_expr, execution_mode, max_concurrency, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(id, name, project_id, req.username, prompt, cron_expr || null, execution_mode || 'new', max_concurrency ?? 1, now, now);
+  db.prepare(`INSERT INTO scheduled_tasks (id, name, project_id, owner, prompt, cron_expr, execution_mode, max_concurrency, dangerously_skip_permissions, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, name, project_id, req.username, prompt, cron_expr || null, execution_mode || 'new', max_concurrency ?? 1, dangerously_skip_permissions !== false ? 1 : 0, now, now);
   registerCronJobs();
   res.json({ id });
 });
@@ -918,15 +922,17 @@ app.post('/api/tasks', (req, res) => {
 app.put('/api/tasks/:id', (req, res) => {
   const task = db.prepare('SELECT * FROM scheduled_tasks WHERE id=? AND owner=?').get(req.params.id, req.username);
   if (!task) return res.status(404).json({ error: '任务不存在' });
-  const { name, project_id, prompt, cron_expr, execution_mode, max_concurrency, enabled } = req.body;
+  const { name, project_id, prompt, cron_expr, execution_mode, max_concurrency, enabled, dangerously_skip_permissions } = req.body;
   if (cron_expr && !cron.validate(cron_expr)) return res.status(400).json({ error: 'Cron 表达式无效' });
 
-  db.prepare(`UPDATE scheduled_tasks SET name=?, project_id=?, prompt=?, cron_expr=?, execution_mode=?, max_concurrency=?, enabled=?, updated_at=? WHERE id=?`)
+  db.prepare(`UPDATE scheduled_tasks SET name=?, project_id=?, prompt=?, cron_expr=?, execution_mode=?, max_concurrency=?, enabled=?, dangerously_skip_permissions=?, updated_at=? WHERE id=?`)
     .run(
       name ?? task.name, project_id ?? task.project_id, prompt ?? task.prompt,
       cron_expr !== undefined ? (cron_expr || null) : task.cron_expr,
       execution_mode ?? task.execution_mode, max_concurrency ?? task.max_concurrency,
-      enabled !== undefined ? (enabled ? 1 : 0) : task.enabled, Date.now(), req.params.id
+      enabled !== undefined ? (enabled ? 1 : 0) : task.enabled,
+      dangerously_skip_permissions !== undefined ? (dangerously_skip_permissions ? 1 : 0) : task.dangerously_skip_permissions,
+      Date.now(), req.params.id
     );
   registerCronJobs();
   res.json({ success: true });
@@ -1069,7 +1075,7 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'start') {
-      const result = createSession(msg.cwd || msg.projectId, msg.cols, msg.rows, msg.resume, username, null, msg.agent);
+      const result = createSession(msg.cwd || msg.projectId, msg.cols, msg.rows, msg.resume, username, null, msg.agent, msg.yolo);
       if (!result) {
         ws.send(JSON.stringify({ type: 'error', data: '项目不存在' }));
         return;
