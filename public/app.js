@@ -1338,10 +1338,10 @@ function updateHealthUI(data) {
     const dk = document.getElementById('healthDisk');
     if (u) u.textContent = formatUptime(data.uptime);
     if (s) s.textContent = data.sessions;
-    if (c && data.cpu) c.textContent = `${data.cpu.load1m} (${data.cpu.cores} cores)`;
-    if (r) r.textContent = `${data.memory.rss} MB`;
-    if (hp) hp.textContent = `${data.memory.heap} MB`;
-    if (dk && data.disk) dk.textContent = `${data.disk.used}/${data.disk.total} GB (${data.disk.percent})`;
+    if (c && data.cpu) c.textContent = `${data.cpu.load1m}`;
+    if (r) r.textContent = `${data.memory.rss}M`;
+    if (hp) hp.textContent = `${data.memory.heap}M`;
+    if (dk && data.disk) dk.textContent = `${data.disk.percent}`;
     // Dashboard panel
     const du = document.getElementById('dashUptime');
     const ds = document.getElementById('dashSessions');

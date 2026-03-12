@@ -1685,6 +1685,70 @@
                 display: none !important;
             }
         }
+        /* Settings panel */
+        .settings-panel { padding:8px 10px; }
+        .settings-card {
+            background: var(--c-surface);
+            border: 1px solid var(--c-border);
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .settings-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--c-text);
+            margin-bottom: 10px;
+        }
+        .settings-icon {
+            width: 22px; height: 22px;
+            border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-top: 1px solid var(--c-border);
+        }
+        .settings-row:first-of-type { border-top: none; }
+        .settings-row-label {
+            font-size: 12px;
+            color: var(--c-text-muted);
+        }
+        .health-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
+        }
+        .health-card {
+            background: var(--c-bg);
+            border-radius: 6px;
+            padding: 6px 4px;
+            text-align: center;
+            min-width: 0;
+        }
+        .health-card-value {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--c-text);
+            font-family: 'SF Mono', Monaco, monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .health-card-label {
+            font-size: 9px;
+            color: var(--c-text-dim);
+            margin-top: 1px;
+        }
+
         /* Toggle switch */
         .toggle-switch { position:relative; display:inline-block; width:36px; height:20px; cursor:pointer; }
         .toggle-switch input { opacity:0; width:0; height:0; }
@@ -1764,9 +1828,13 @@
 
         <!-- Tab: 设置 -->
         <div class="sidebar-tab-content" id="sidebarTabSettings">
-            <div style="padding:8px 12px;">
-                <div style="margin-bottom:16px;">
-                    <label style="font-size:13px;font-weight:500;color:var(--c-text);display:block;margin-bottom:8px;">项目目录</label>
+            <div class="settings-panel">
+                <!-- 项目目录 -->
+                <div class="settings-card">
+                    <div class="settings-card-header">
+                        <span class="settings-icon" style="background:var(--c-accent);">&#128193;</span>
+                        <span>项目目录</span>
+                    </div>
                     <div id="sidebarSettingsRootList"></div>
                     <div style="display:flex;gap:6px;margin-top:8px;">
                         <input type="text" id="sidebarSettingsNewRoot" class="project-search-input" placeholder="添加路径，如 ~/work" style="flex:1;" onkeydown="if(event.key==='Enter')addProjectRoot('sidebar')">
@@ -1774,33 +1842,64 @@
                     </div>
                     <div style="color:var(--c-red);font-size:11px;margin-top:4px;" id="sidebarSettingsRootError"></div>
                 </div>
-                <div style="margin-bottom:16px;">
-                    <label style="font-size:13px;font-weight:500;color:var(--c-text);display:block;margin-bottom:8px;">终端字号</label>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <button class="btn-font" onclick="changeFontSize(-1)">A-</button>
-                        <span style="font-size:12px;color:var(--c-text-muted);" id="fontSizeLabel"></span>
-                        <button class="btn-font" onclick="changeFontSize(1)">A+</button>
+
+                <!-- 终端 & 模式 -->
+                <div class="settings-card">
+                    <div class="settings-card-header">
+                        <span class="settings-icon" style="background:#8b5cf6;">&#9881;</span>
+                        <span>偏好设置</span>
                     </div>
-                </div>
-                <div style="margin-bottom:16px;">
-                    <div style="font-size:13px;font-weight:500;color:var(--c-text);display:flex;align-items:center;justify-content:space-between;">
-                        <span>无确认模式</span>
+                    <div class="settings-row">
+                        <span class="settings-row-label">终端字号</span>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button class="btn-font" onclick="changeFontSize(-1)">A-</button>
+                            <span style="font-size:12px;color:var(--c-text);font-weight:500;min-width:32px;text-align:center;" id="fontSizeLabel"></span>
+                            <button class="btn-font" onclick="changeFontSize(1)">A+</button>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <div>
+                            <span class="settings-row-label">无确认模式</span>
+                            <div style="font-size:10px;color:var(--c-text-dim);margin-top:1px;">跳过所有确认提示</div>
+                        </div>
                         <label class="toggle-switch" style="margin:0;">
                             <input type="checkbox" id="yoloToggle" onchange="toggleYoloMode()">
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    <div style="font-size:11px;color:var(--c-text-muted);margin-top:4px;">新会话跳过确认提示</div>
                 </div>
-                <div style="margin-bottom:16px;">
-                    <label style="font-size:13px;font-weight:500;color:var(--c-text);display:block;margin-bottom:8px;">系统状态</label>
-                    <div class="health-rows">
-                        <div class="health-row"><span>运行时间</span><span id="healthUptime">--</span></div>
-                        <div class="health-row"><span>活跃会话</span><span id="healthSessions">--</span></div>
-                        <div class="health-row"><span>CPU 负载</span><span id="healthCpu">--</span></div>
-                        <div class="health-row"><span>RSS 内存</span><span id="healthRss">--</span></div>
-                        <div class="health-row"><span>Heap 内存</span><span id="healthHeap">--</span></div>
-                        <div class="health-row"><span>磁盘</span><span id="healthDisk">--</span></div>
+
+                <!-- 系统状态 -->
+                <div class="settings-card">
+                    <div class="settings-card-header">
+                        <span class="settings-icon" style="background:#10b981;">&#9889;</span>
+                        <span>系统状态</span>
+                    </div>
+                    <div class="health-grid">
+                        <div class="health-card">
+                            <div class="health-card-value" id="healthUptime">--</div>
+                            <div class="health-card-label">运行</div>
+                        </div>
+                        <div class="health-card">
+                            <div class="health-card-value" id="healthSessions">--</div>
+                            <div class="health-card-label">会话</div>
+                        </div>
+                        <div class="health-card">
+                            <div class="health-card-value" id="healthCpu">--</div>
+                            <div class="health-card-label">CPU</div>
+                        </div>
+                        <div class="health-card">
+                            <div class="health-card-value" id="healthRss">--</div>
+                            <div class="health-card-label">RSS</div>
+                        </div>
+                        <div class="health-card">
+                            <div class="health-card-value" id="healthHeap">--</div>
+                            <div class="health-card-label">Heap</div>
+                        </div>
+                        <div class="health-card">
+                            <div class="health-card-value" id="healthDisk">--</div>
+                            <div class="health-card-label">磁盘</div>
+                        </div>
                     </div>
                 </div>
             </div>
