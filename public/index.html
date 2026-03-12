@@ -933,7 +933,7 @@
             margin-bottom: 12px;
         }
 
-        .modal-field input {
+        .modal-field input:not([type="checkbox"]):not([type="radio"]) {
             width: 100%;
             background: var(--c-input-bg);
             border: 1px solid var(--c-border-light);
@@ -943,12 +943,12 @@
             font-size: 13px;
         }
 
-        .modal-field input:focus {
+        .modal-field input:not([type="checkbox"]):not([type="radio"]):focus {
             outline: none;
             border-color: var(--c-accent);
         }
 
-        .modal-field input::placeholder {
+        .modal-field input:not([type="checkbox"]):not([type="radio"])::placeholder {
             color: var(--c-text-faint);
         }
 
@@ -1078,6 +1078,7 @@
             gap: 4px;
             color: var(--c-text-dim);
             cursor: pointer;
+            white-space: nowrap;
         }
         .task-cron-hint {
             font-size: 10px;
@@ -1773,14 +1774,14 @@
                     </div>
                 </div>
                 <div style="margin-bottom:16px;">
-                    <label style="font-size:13px;font-weight:500;color:var(--c-text);display:flex;align-items:center;justify-content:space-between;">
+                    <div style="font-size:13px;font-weight:500;color:var(--c-text);display:flex;align-items:center;justify-content:space-between;">
                         <span>无确认模式</span>
                         <label class="toggle-switch" style="margin:0;">
                             <input type="checkbox" id="yoloToggle" onchange="toggleYoloMode()">
                             <span class="toggle-slider"></span>
                         </label>
-                    </label>
-                    <div style="font-size:11px;color:var(--c-text-muted);margin-top:4px;">开启后新会话将跳过所有确认提示 (--dangerously-skip-permissions)</div>
+                    </div>
+                    <div style="font-size:11px;color:var(--c-text-muted);margin-top:4px;">新会话跳过确认提示</div>
                 </div>
                 <div style="margin-bottom:16px;">
                     <label style="font-size:13px;font-weight:500;color:var(--c-text);display:block;margin-bottom:8px;">系统状态</label>
@@ -1975,8 +1976,8 @@
                 </div>
             </div>
             <div class="modal-field">
-                <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--c-text-muted);cursor:pointer;">
-                    <input type="checkbox" id="taskYolo" checked> 无确认模式 (--dangerously-skip-permissions)
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--c-text-muted);cursor:pointer;white-space:nowrap;">
+                    <input type="checkbox" id="taskYolo" checked style="flex-shrink:0;"> 无确认模式
                 </label>
             </div>
             <div class="modal-error" id="createTaskError"></div>

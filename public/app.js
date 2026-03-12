@@ -517,6 +517,7 @@ function createTabWebSocket(tabId, tabInfo) {
         const msg = JSON.parse(event.data);
         if (msg.type === 'output') {
             tabInfo.term.write(msg.data);
+            tabInfo.term.scrollToBottom();
             if (tabInfo.sessionId === activeTabId) {
                 setActivityIdle(false);
                 if (activityTimeout) clearTimeout(activityTimeout);
@@ -524,6 +525,7 @@ function createTabWebSocket(tabId, tabInfo) {
             }
         } else if (msg.type === 'replay') {
             tabInfo.term.write(msg.data);
+            tabInfo.term.scrollToBottom();
         } else if (msg.type === 'started') {
             const oldId = tabInfo.sessionId;
             tabInfo.sessionId = msg.sessionId;
