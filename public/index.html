@@ -935,6 +935,7 @@
 
         .modal-field input:not([type="checkbox"]):not([type="radio"]) {
             width: 100%;
+            box-sizing: border-box;
             background: var(--c-input-bg);
             border: 1px solid var(--c-border-light);
             border-radius: 6px;
@@ -946,6 +947,7 @@
         .modal-field input:not([type="checkbox"]):not([type="radio"]):focus {
             outline: none;
             border-color: var(--c-accent);
+            box-shadow: 0 0 0 2px rgba(99,132,255,0.15);
         }
 
         .modal-field input:not([type="checkbox"]):not([type="radio"])::placeholder {
@@ -967,6 +969,7 @@
         .modal-field textarea:focus {
             outline: none;
             border-color: var(--c-accent);
+            box-shadow: 0 0 0 2px rgba(99,132,255,0.15);
         }
         .modal-field select {
             width: 100%;
@@ -974,15 +977,21 @@
             background: var(--c-input-bg);
             border: 1px solid var(--c-border-light);
             border-radius: 6px;
-            padding: 10px 12px;
+            padding: 10px 32px 10px 12px;
             color: var(--c-text);
             font-size: 13px;
             -webkit-appearance: none;
+            -moz-appearance: none;
             appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23999' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            cursor: pointer;
         }
         .modal-field select:focus {
             outline: none;
             border-color: var(--c-accent);
+            box-shadow: 0 0 0 2px rgba(99,132,255,0.15);
         }
 
         .modal-actions {
