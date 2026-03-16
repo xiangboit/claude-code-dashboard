@@ -265,7 +265,7 @@ document.addEventListener('click', (e) => {
         const menu = document.getElementById('userMenu');
         if (menu) menu.classList.remove('open');
     }
-    if (!e.target.closest('.header-project-selector')) {
+    if (!e.target.closest('.header-project-selector') && !e.target.closest('#newSessionBtn')) {
         const pd = document.getElementById('projectDropdown');
         if (pd) pd.classList.remove('open');
     }
