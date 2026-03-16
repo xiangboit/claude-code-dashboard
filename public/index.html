@@ -209,17 +209,17 @@
         .project-list {
             flex: 1;
             overflow-y: auto;
-            padding: 8px;
+            padding: 6px;
             -webkit-overflow-scrolling: touch;
         }
 
         .project-item {
-            padding: 10px 12px;
+            padding: 7px 10px;
             border-radius: 6px;
             cursor: pointer;
-            margin-bottom: 4px;
+            margin-bottom: 1px;
             position: relative;
-            transition: background 0.15s;
+            transition: background 0.12s, box-shadow 0.12s;
         }
 
         .project-item:hover {
@@ -228,6 +228,7 @@
 
         .project-item.active {
             background: var(--c-surface-active);
+            box-shadow: inset 2px 0 0 var(--c-accent);
         }
 
         .project-pin {
@@ -236,39 +237,47 @@
             border: none;
             color: var(--c-text-dim);
             cursor: pointer;
-            font-size: 12px;
-            padding: 2px 4px;
+            font-size: 11px;
+            padding: 0 2px;
             flex-shrink: 0;
-            transition: opacity 0.15s;
+            transition: opacity 0.12s, color 0.12s;
             margin-left: auto;
         }
         .project-item:hover .project-pin,
         .project-pin.pinned { opacity: 1; }
         .project-pin.pinned { color: var(--c-accent); }
-        .project-pin:hover { background: var(--c-surface-hover); border-radius: 4px; }
-        .pin-separator { height: 1px; background: var(--c-border); margin: 4px 8px; }
+        .project-pin:hover { color: var(--c-accent); }
+        .pin-separator {
+            height: 1px;
+            background: var(--c-border);
+            margin: 4px 10px;
+            opacity: 0.6;
+        }
         .root-group-header {
             font-size: 10px;
             font-weight: 600;
             color: var(--c-text-ghost);
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            padding: 8px 12px 4px;
+            padding: 10px 10px 3px;
         }
 
         .worktree-toggle {
-            font-size: 10px;
+            font-size: 9px;
             color: var(--c-text-dim);
             cursor: pointer;
-            padding: 0 4px;
+            padding: 0 2px;
             transition: transform 0.15s;
-            display: inline-block;
+            display: inline-flex;
+            width: 12px;
+            justify-content: center;
+            flex-shrink: 0;
         }
         .worktree-toggle.expanded { transform: rotate(90deg); }
-        .worktree-list { padding-left: 20px; display: none; }
+        .worktree-list { padding-left: 24px; display: none; }
         .worktree-list.open { display: block; }
         .worktree-item {
-            padding: 3px 8px;
+            padding: 4px 8px;
             font-size: 11px;
             color: var(--c-text-muted);
             cursor: pointer;
@@ -277,19 +286,29 @@
         }
         .worktree-item:hover { background: var(--c-surface-hover); color: var(--c-text); }
         .root-tag {
-            font-size: 10px;
+            font-size: 9px;
             color: var(--c-text-ghost);
-            margin-left: auto;
             flex-shrink: 0;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: rgba(255,255,255,0.04);
         }
 
         .project-name {
             font-size: 13px;
             font-weight: 500;
-            margin-bottom: 2px;
             display: flex;
             align-items: center;
             gap: 6px;
+            min-width: 0;
+        }
+
+        .project-name-text {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .session-dot {
@@ -297,6 +316,16 @@
             height: 6px;
             border-radius: 50%;
             background: var(--c-green);
+            flex-shrink: 0;
+        }
+
+        .session-count {
+            font-size: 10px;
+            color: var(--c-text-muted);
+            background: rgba(74, 144, 226, 0.12);
+            border-radius: 8px;
+            padding: 0 5px;
+            line-height: 16px;
             flex-shrink: 0;
         }
 
@@ -1076,6 +1105,105 @@
             font-size: 12px;
             margin-top: 10px;
             min-height: 16px;
+        }
+
+        .ns-modal {
+            width: 440px;
+            max-height: 75vh;
+            display: flex;
+            flex-direction: column;
+            padding: 24px 28px;
+            overflow: hidden;
+        }
+        .ns-section { margin-bottom: 16px; }
+        .ns-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--c-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .ns-search {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 9px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            background: var(--c-input-bg);
+            border: 1px solid var(--c-border-light);
+            color: var(--c-text);
+            outline: none;
+            margin-bottom: 8px;
+        }
+        .ns-search:focus {
+            border-color: var(--c-accent);
+            box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.15);
+        }
+        .ns-project-list {
+            max-height: 240px;
+            overflow-y: auto;
+            border: 1px solid var(--c-border-light);
+            border-radius: 8px;
+            padding: 4px;
+        }
+        .picker-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 9px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.12s;
+            margin-bottom: 1px;
+        }
+        .picker-item:hover { background: var(--c-surface-hover); }
+        .picker-item.active {
+            background: rgba(74, 144, 226, 0.18);
+            color: var(--c-text);
+        }
+        .picker-item-name {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--c-text);
+        }
+        .picker-item-sessions {
+            font-size: 11px;
+            color: var(--c-text-muted);
+            background: rgba(74, 144, 226, 0.12);
+            padding: 2px 8px;
+            border-radius: 999px;
+            flex-shrink: 0;
+        }
+        .ns-agent-list {
+            display: flex;
+            gap: 8px;
+        }
+        .ns-agent-btn {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--c-border-light);
+            background: var(--c-input-bg);
+            color: var(--c-text-muted);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .ns-agent-btn:hover {
+            border-color: var(--c-accent);
+            color: var(--c-text);
+        }
+        .ns-agent-btn.active {
+            background: rgba(74, 144, 226, 0.15);
+            border-color: var(--c-accent);
+            color: var(--c-text);
+            box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.12);
         }
 
         .modal-field label {
@@ -2195,6 +2323,28 @@
             <div class="modal-actions">
                 <button class="modal-btn-cancel" onclick="closeChangePassword()">取消</button>
                 <button class="modal-btn-confirm" onclick="doChangePassword()">确认修改</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新建对话弹窗 -->
+    <div class="modal-overlay" id="newSessionModal" onclick="if(event.target===this)closeNewSessionModal()">
+        <div class="modal-card ns-modal">
+            <h3>新建对话</h3>
+            <div class="ns-section">
+                <label class="ns-label">项目</label>
+                <input type="text" id="nsProjectSearch" class="ns-search" placeholder="搜索项目..."
+                       oninput="renderNewSessionProjects(this.value)"
+                       onkeydown="if(event.key==='Escape')closeNewSessionModal()">
+                <div id="nsProjectList" class="ns-project-list"></div>
+            </div>
+            <div class="ns-section">
+                <label class="ns-label">Agent</label>
+                <div id="nsAgentList" class="ns-agent-list"></div>
+            </div>
+            <div class="modal-actions" style="margin-top:8px;">
+                <button class="modal-btn-cancel" onclick="closeNewSessionModal()">取消</button>
+                <button class="modal-btn-confirm" id="nsStartBtn" onclick="confirmNewSession()" disabled>开始</button>
             </div>
         </div>
     </div>

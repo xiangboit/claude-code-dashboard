@@ -265,7 +265,7 @@ document.addEventListener('click', (e) => {
         const menu = document.getElementById('userMenu');
         if (menu) menu.classList.remove('open');
     }
-    if (!e.target.closest('.header-project-selector') && !e.target.closest('#newSessionBtn')) {
+    if (!e.target.closest('.header-project-selector')) {
         const pd = document.getElementById('projectDropdown');
         if (pd) pd.classList.remove('open');
     }
@@ -1202,7 +1202,7 @@ function renderProjects(overrideList, hintText) {
              onclick="selectProject('${pid}')">
             <div class="project-name">
                 ${wtToggle}
-                ${liveCount > 0 ? '<span class="session-dot"></span>' : ''}${name}
+                ${liveCount > 0 ? '<span class="session-dot"></span>' : ''}<span class="project-name-text">${name}</span>
                 ${liveCount > 1 ? `<span class="session-count">${liveCount}</span>` : ''}
                 ${rootTag}
                 <button class="project-pin ${pinClass}" onclick="togglePin('${pid}', event)" title="${p.pinned ? '取消置顶' : '置顶'}">${pinIcon}</button>
@@ -1523,7 +1523,15 @@ function toggleSidebar() {
         const isOpen = sidebar.classList.toggle('open');
         overlay.classList.toggle('active', isOpen);
     } else {
+        const isCollapsing = !sidebar.classList.contains('collapsed');
+        if (isCollapsing) {
+            sidebar.style.width = '';
+        }
         sidebar.classList.toggle('collapsed');
+        if (!isCollapsing) {
+            const saved = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) || '', 10);
+            if (Number.isFinite(saved)) sidebar.style.width = saved + 'px';
+        }
         localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
     }
     setTimeout(doFit, 300);
@@ -1591,38 +1599,91 @@ function switchSidebarTab(tabName) {
 
 // ---- 新建对话（含 Agent 选择） ----
 
-function handleNewSession(event) {
-    if (!currentProject) {
-        projectPickerIntent = 'new-session';
-        if (window.innerWidth <= 768) {
-            switchSidebarTab('projects');
-            const sidebar = document.getElementById('sidebar');
-            const overlay = document.getElementById('sidebarOverlay');
-            if (sidebar) sidebar.classList.add('open');
-            if (overlay) overlay.classList.add('active');
-        } else {
-            toggleProjectDropdown({ preserveIntent: true });
-        }
+// ---- 新建对话弹窗 ----
+
+let newSessionPickedProject = null;
+let newSessionPickedAgent = 'claude';
+
+function openNewSessionModal() {
+    const modal = document.getElementById('newSessionModal');
+    newSessionPickedProject = currentProject ? currentProject.id : null;
+    newSessionPickedAgent = selectedAgent || 'claude';
+    modal.classList.add('open');
+    const search = document.getElementById('nsProjectSearch');
+    search.value = '';
+    renderNewSessionProjects('');
+    renderNewSessionAgents();
+    updateNewSessionStartBtn();
+    setTimeout(() => {
+        if (!newSessionPickedProject) search.focus();
+    }, 100);
+}
+
+function closeNewSessionModal() {
+    document.getElementById('newSessionModal').classList.remove('open');
+}
+
+function renderNewSessionProjects(query) {
+    const list = document.getElementById('nsProjectList');
+    const q = query.toLowerCase().trim();
+    const filtered = q ? projectsCache.filter(p => p.name.toLowerCase().includes(q)) : projectsCache;
+    if (filtered.length === 0) {
+        list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--c-text-dim);font-size:13px;">无匹配项目</div>';
         return;
     }
-    if (availableAgents.length > 1) {
-        // 多 agent：显示下拉选择
-        if (event) event.stopPropagation();
-        const dropdown = document.getElementById('agentDropdown');
-        if (dropdown.classList.contains('open')) {
-            dropdown.classList.remove('open');
-            return;
-        }
-        const list = document.getElementById('agentDropdownList');
-        list.innerHTML = availableAgents.map(a =>
-            `<div class="agent-dropdown-item" onclick="selectAgentAndStart('${escapeHtml(a)}')">
-                <span class="agent-icon"></span>${escapeHtml(a)}
-            </div>`
-        ).join('');
-        dropdown.classList.add('open');
-        return;
-    }
+    list.innerHTML = filtered.map(p => {
+        const liveSessions = getProjectSessions(p.id).filter(s => !s.stale);
+        const name = escapeHtml(p.name);
+        const picked = newSessionPickedProject === p.id;
+        return `<div class="picker-item ${picked ? 'active' : ''}" onclick="pickNewSessionProject('${escapeHtml(p.id)}')">
+            <div class="picker-item-name">${liveSessions.length > 0 ? '<span class="session-dot"></span>' : ''}${name}</div>
+            ${liveSessions.length > 0 ? '<span class="picker-item-sessions">' + liveSessions.length + ' session' + (liveSessions.length > 1 ? 's' : '') + '</span>' : ''}
+        </div>`;
+    }).join('');
+}
+
+function pickNewSessionProject(projectId) {
+    newSessionPickedProject = projectId;
+    renderNewSessionProjects(document.getElementById('nsProjectSearch').value);
+    updateNewSessionStartBtn();
+}
+
+function renderNewSessionAgents() {
+    const container = document.getElementById('nsAgentList');
+    container.innerHTML = availableAgents.map(a => {
+        const picked = newSessionPickedAgent === a;
+        const icon = a === 'claude' ? '&#9672;' : a === 'codex' ? '&#9673;' : '&#9679;';
+        return `<button class="ns-agent-btn ${picked ? 'active' : ''}" onclick="pickNewSessionAgent('${escapeHtml(a)}')">${icon} ${escapeHtml(a)}</button>`;
+    }).join('');
+}
+
+function pickNewSessionAgent(agent) {
+    newSessionPickedAgent = agent;
+    renderNewSessionAgents();
+}
+
+function updateNewSessionStartBtn() {
+    const btn = document.getElementById('nsStartBtn');
+    btn.disabled = !newSessionPickedProject;
+}
+
+function confirmNewSession() {
+    if (!newSessionPickedProject) return;
+    const project = projectsCache.find(p => p.id === newSessionPickedProject);
+    if (!project) return;
+    currentProject = project;
+    document.getElementById('projectTitle').textContent = currentProject.name;
+    document.getElementById('headerProjectPath').textContent = currentProject.path;
+    document.getElementById('projectSwitchLabel').textContent = currentProject.name;
+    renderProjects();
+    closeSidebar();
+    selectedAgent = newSessionPickedAgent;
+    closeNewSessionModal();
     reconnect(false);
+}
+
+function handleNewSession(event) {
+    openNewSessionModal();
 }
 
 function selectAgentAndStart(agent) {
