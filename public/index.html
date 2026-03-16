@@ -43,6 +43,17 @@
             --c-shadow: rgba(0,0,0,0.4);
             --c-overlay: rgba(0,0,0,0.6);
             --c-overlay-light: rgba(0,0,0,0.5);
+            /* Project card */
+            --c-card-bg: rgba(255,255,255,0.02);
+            --c-card-border: rgba(255,255,255,0.06);
+            --c-card-hover-bg: rgba(255,255,255,0.05);
+            --c-card-hover-border: rgba(255,255,255,0.10);
+            --c-card-active-bg: linear-gradient(135deg, rgba(74,144,226,0.14), rgba(74,144,226,0.06));
+            --c-card-active-border: rgba(74,144,226,0.35);
+            --c-card-active-shadow: 0 2px 8px rgba(74,144,226,0.10);
+            --c-pin-hover-bg: rgba(255,255,255,0.08);
+            --c-tag-bg: rgba(255,255,255,0.05);
+            --c-tag-border: rgba(255,255,255,0.06);
         }
 
         [data-theme="light"] {
@@ -81,6 +92,17 @@
             --c-shadow: rgba(0,0,0,0.12);
             --c-overlay: rgba(0,0,0,0.3);
             --c-overlay-light: rgba(0,0,0,0.2);
+            /* Project card */
+            --c-card-bg: rgba(0,0,0,0.02);
+            --c-card-border: rgba(0,0,0,0.08);
+            --c-card-hover-bg: rgba(0,0,0,0.04);
+            --c-card-hover-border: rgba(0,0,0,0.12);
+            --c-card-active-bg: linear-gradient(135deg, rgba(58,123,213,0.10), rgba(58,123,213,0.04));
+            --c-card-active-border: rgba(58,123,213,0.40);
+            --c-card-active-shadow: 0 2px 8px rgba(58,123,213,0.12);
+            --c-pin-hover-bg: rgba(0,0,0,0.06);
+            --c-tag-bg: rgba(0,0,0,0.04);
+            --c-tag-border: rgba(0,0,0,0.08);
         }
 
         * {
@@ -209,26 +231,31 @@
         .project-list {
             flex: 1;
             overflow-y: auto;
-            padding: 6px;
+            padding: 8px 8px 14px;
             -webkit-overflow-scrolling: touch;
         }
 
         .project-item {
-            padding: 7px 10px;
-            border-radius: 6px;
+            padding: 9px 12px;
+            border-radius: 10px;
             cursor: pointer;
-            margin-bottom: 1px;
+            margin-bottom: 4px;
             position: relative;
-            transition: background 0.12s, box-shadow 0.12s;
+            border: 1px solid var(--c-card-border);
+            background: var(--c-card-bg);
+            transition: all 0.15s ease;
         }
 
         .project-item:hover {
-            background: var(--c-surface-hover);
+            background: var(--c-card-hover-bg);
+            border-color: var(--c-card-hover-border);
+            transform: translateX(2px);
         }
 
         .project-item.active {
-            background: var(--c-surface-active);
-            box-shadow: inset 2px 0 0 var(--c-accent);
+            background: var(--c-card-active-bg);
+            border-color: var(--c-card-active-border);
+            box-shadow: var(--c-card-active-shadow);
         }
 
         .project-pin {
@@ -238,28 +265,33 @@
             color: var(--c-text-dim);
             cursor: pointer;
             font-size: 11px;
-            padding: 0 2px;
+            width: 22px;
+            height: 22px;
+            padding: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             flex-shrink: 0;
-            transition: opacity 0.12s, color 0.12s;
+            transition: all 0.12s;
             margin-left: auto;
+            border-radius: 4px;
         }
         .project-item:hover .project-pin,
         .project-pin.pinned { opacity: 1; }
         .project-pin.pinned { color: var(--c-accent); }
-        .project-pin:hover { color: var(--c-accent); }
+        .project-pin:hover { background: var(--c-pin-hover-bg); color: var(--c-accent); }
         .pin-separator {
             height: 1px;
-            background: var(--c-border);
-            margin: 4px 10px;
-            opacity: 0.6;
+            background: linear-gradient(90deg, transparent, var(--c-border), transparent);
+            margin: 6px 12px 8px;
         }
         .root-group-header {
             font-size: 10px;
-            font-weight: 600;
-            color: var(--c-text-ghost);
+            font-weight: 700;
+            color: var(--c-text-dim);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 10px 10px 3px;
+            letter-spacing: 0.8px;
+            padding: 12px 12px 4px;
         }
 
         .worktree-toggle {
@@ -274,24 +306,30 @@
             flex-shrink: 0;
         }
         .worktree-toggle.expanded { transform: rotate(90deg); }
-        .worktree-list { padding-left: 24px; display: none; }
+        .worktree-list { padding: 2px 0 0 20px; display: none; }
         .worktree-list.open { display: block; }
         .worktree-item {
-            padding: 4px 8px;
+            padding: 5px 10px;
             font-size: 11px;
             color: var(--c-text-muted);
             cursor: pointer;
-            border-radius: 4px;
-            margin-bottom: 1px;
+            border-radius: 6px;
+            margin-bottom: 2px;
+            border: 1px solid transparent;
         }
-        .worktree-item:hover { background: var(--c-surface-hover); color: var(--c-text); }
+        .worktree-item:hover {
+            background: var(--c-card-bg);
+            border-color: var(--c-card-border);
+            color: var(--c-text);
+        }
         .root-tag {
             font-size: 9px;
-            color: var(--c-text-ghost);
+            color: var(--c-text-muted);
             flex-shrink: 0;
-            padding: 1px 5px;
-            border-radius: 3px;
-            background: rgba(255,255,255,0.04);
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: var(--c-tag-bg);
+            border: 1px solid var(--c-tag-border);
         }
 
         .project-name {
@@ -312,20 +350,22 @@
         }
 
         .session-dot {
-            width: 6px;
-            height: 6px;
+            width: 7px;
+            height: 7px;
             border-radius: 50%;
             background: var(--c-green);
             flex-shrink: 0;
+            box-shadow: 0 0 4px rgba(76,175,80,0.4);
         }
 
         .session-count {
             font-size: 10px;
-            color: var(--c-text-muted);
+            color: var(--c-accent);
             background: rgba(74, 144, 226, 0.12);
-            border-radius: 8px;
-            padding: 0 5px;
-            line-height: 16px;
+            border: 1px solid rgba(74, 144, 226, 0.18);
+            border-radius: 10px;
+            padding: 1px 7px;
+            line-height: 15px;
             flex-shrink: 0;
         }
 
